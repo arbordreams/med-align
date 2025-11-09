@@ -13,8 +13,17 @@ We propose an efficient method named TokAlign to replace the vocabulary of LLM f
 ```
 conda create -n tokalign python=3.10
 conda activate tokalign
+
+# Install PyTorch first. Use the CUDA 12.8 wheel on Linux GPU hosts:
+pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+
+# On macOS or CPU-only environments, omit the CUDA index:
+# pip install torch==2.8.0
+
 pip install -r requirements.txt
 ```
+
+Linux-only extras (`deepspeed`, `bitsandbytes`, `flash-attn`) are guarded by environment markers and will be skipped automatically on unsupported platforms. A helper script (`install_deps.sh`) is also available if you prefer a single command that performs these steps.
 
 ### Prepare tokenized data (parallel mode)
 

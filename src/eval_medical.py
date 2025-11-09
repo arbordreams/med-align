@@ -33,7 +33,7 @@ def evaluate_perplexity(
     """
 
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
-    model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.float32)
+    model = AutoModelForCausalLM.from_pretrained(model_path, dtype=torch.float32)
     model.eval()
 
     ds = datasets.load_dataset(dataset_name, split=split)

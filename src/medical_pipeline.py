@@ -362,6 +362,14 @@ def parse_args() -> argparse.Namespace:
     tokenize_parser.add_argument("--aggregated-jsonl", required=True, help="Path to aggregated medical corpus.")
     tokenize_parser.add_argument("--tokenizer-source", required=True, help="Source tokenizer path or identifier.")
     tokenize_parser.add_argument("--tokenizer-target", required=True, help="Target tokenizer path or identifier.")
+    tokenize_parser.add_argument(
+        "--source-model-fallback",
+        help="Model identifier to use when the source tokenizer lacks an attached config (defaults to --tokenizer-source).",
+    )
+    tokenize_parser.add_argument(
+        "--target-model-fallback",
+        help="Model identifier to use when the target tokenizer lacks an attached config (defaults to --tokenizer-target).",
+    )
     tokenize_parser.add_argument("--tokenizer-workers", type=int, default=8, help="Workers for tokenization.")
     tokenize_parser.add_argument("--tokenizer-cache", help="Cache directory for datasets/tokenizers.")
     tokenize_parser.add_argument(
@@ -419,11 +427,15 @@ def main() -> None:
         )
         print(json.dumps(outputs, indent=2))
     elif args.command == "tokenize":
+        source_fallback = args.source_model_fallback or args.tokenizer_source
+        target_fallback = args.target_model_fallback or args.tokenizer_target
         outputs = tokenize_corpus(
             run_dir=Path(args.run_dir),
             aggregated_jsonl=args.aggregated_jsonl,
             tokenizer_source=args.tokenizer_source,
             tokenizer_target=args.tokenizer_target,
+            source_model_fallback=source_fallback,
+            target_model_fallback=target_fallback,
             tokenizer_workers=args.tokenizer_workers,
             tokenizer_cache_dir=args.tokenizer_cache,
             min_line_length=args.min_line_length,

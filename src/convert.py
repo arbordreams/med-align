@@ -27,7 +27,7 @@ def trans2switch(
 ):
     src_model = AutoModelForCausalLM.from_pretrained(
         src_clm_path,
-        torch_dtype=torch.float32,
+        dtype=torch.float32,
         trust_remote_code=True,
         device_map="cpu",
     )
@@ -102,7 +102,7 @@ def random_permute(
 
     src_model = AutoModelForCausalLM.from_pretrained(
         src_clm_path,
-        torch_dtype=torch.float32,
+        dtype=torch.float32,
         trust_remote_code=True,
         device_map="cpu",
     )
@@ -149,7 +149,7 @@ def random_initial_all(
 
     src_model = AutoModelForCausalLM.from_pretrained(
         src_clm_path,
-        torch_dtype=torch.float32,
+        dtype=torch.float32,
         trust_remote_code=True,
         device_map="cpu",
     )
@@ -193,7 +193,7 @@ def random_initial_aug(
 
     src_model = AutoModelForCausalLM.from_pretrained(
         src_clm_path,
-        torch_dtype=torch.float32,
+        dtype=torch.float32,
         trust_remote_code=True,
         device_map="cpu",
     )
