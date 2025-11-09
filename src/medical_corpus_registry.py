@@ -48,50 +48,15 @@ class DatasetSpec:
 
 
 DATASET_REGISTRY: Dict[str, DatasetSpec] = {
-    "medical_meadow_mediqa": DatasetSpec(
-        slug="medical_meadow_mediqa",
-        dataset_id="medalpaca/medical_meadow_mediqa",
+    "pubmed_abstract": DatasetSpec(
+        slug="pubmed_abstract",
+        dataset_id="uiyunkim-hub/pubmed-abstract",
         config_name=None,
         split="train",
-        text_fields=("input", "output"),
-        license="Apache 2.0",
-        description="Medical QA pairs from MEDIQA challenge (MedAlpaca collection).",
-    ),
-    "medqa_usmle": DatasetSpec(
-        slug="medqa_usmle",
-        dataset_id="GBaker/MedQA-USMLE-4-options",
-        config_name=None,
-        split="train",
-        text_fields=("question", "answer"),
-        license="MIT",
-        description="USMLE-style medical exam questions with 4-option answers.",
-    ),
-    "medquad": DatasetSpec(
-        slug="medquad",
-        dataset_id="keivalya/MedQuad-MedicalQnADataset",
-        config_name=None,
-        split="train",
-        text_fields=("Question", "Answer"),
+        text_fields=("abstract",),
         license="Public Domain",
-        description="Medical question-answer pairs from NIH sources.",
-    ),
-    "medtext": DatasetSpec(
-        slug="medtext",
-        dataset_id="BI55/MedText",
-        config_name=None,
-        split="train",
-        text_fields=("text",),
-        license="Apache 2.0",
-        description="General medical text corpus for NLP tasks.",
-    ),
-    "medical_health_advice": DatasetSpec(
-        slug="medical_health_advice",
-        dataset_id="medalpaca/medical_meadow_health_advice",
-        config_name=None,
-        split="train",
-        text_fields=("input", "output"),
-        license="Apache 2.0",
-        description="Health advice question-answer pairs (MedAlpaca collection).",
+        description="PubMed abstracts from uiyunkim-hub collection.",
+        max_samples_hint=None,
     ),
 }
 

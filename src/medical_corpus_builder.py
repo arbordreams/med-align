@@ -90,7 +90,7 @@ def build_dataset_shard(
     load_kwargs = {
         "split": spec.split,
         "streaming": True,
-        "use_auth_token": hf_token,
+        "token": hf_token,
     }
     try:
         if spec.config_name:

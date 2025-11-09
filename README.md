@@ -94,11 +94,7 @@ produces an aggregated shard compatible with the medical pipeline.
 
 Supported dataset slugs (see `src/medical_corpus_registry.py` for details):
 
-- `medical_meadow_mediqa` — `medalpaca/medical_meadow_mediqa` (Medical QA pairs, Apache 2.0)
-- `medqa_usmle` — `GBaker/MedQA-USMLE-4-options` (USMLE exam questions, MIT)
-- `medquad` — `keivalya/MedQuad-MedicalQnADataset` (NIH medical Q&A, Public Domain)
-- `medtext` — `BI55/MedText` (General medical corpus, Apache 2.0)
-- `medical_health_advice` — `medalpaca/medical_meadow_health_advice` (Health advice Q&A, Apache 2.0)
+- `pubmed_abstract` — `uiyunkim-hub/pubmed-abstract` (PubMed abstracts, Public Domain)
 
 Usage:
 
