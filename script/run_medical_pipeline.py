@@ -102,7 +102,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-term-frequency", type=int, default=5, help="Minimum term frequency.")
     parser.add_argument("--term-top-k", type=int, default=500, help="Number of terms to keep.")
     parser.add_argument("--use-tfidf", action="store_true", help="Use TF-IDF weighting when mining terms.")
-    parser.add_argument("--embedding-backend", choices=["glove", "fasttext"], default="glove", help="Embedding backend.")
+    parser.add_argument(
+        "--embedding-backend",
+        choices=["glove", "fasttext"],
+        default="fasttext",
+        help="Embedding backend.",
+    )
     parser.add_argument("--pivot-count", type=int, default=300, help="Number of pivot tokens during alignment.")
     parser.add_argument("--tokenizer-workers", type=int, default=8, help="Number of preprocessing workers.")
     parser.add_argument("--tokenizer-cache", help="Cache directory passed to Hugging Face dataset loader.")

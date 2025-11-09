@@ -211,20 +211,27 @@ def train_embeddings_and_align(
     if embedding_backend not in {"glove", "fasttext"}:
         raise ValueError(f"Unsupported embedding backend: {embedding_backend}")
 
+    glove_dir: Optional[Path] = None
+    if embedding_backend == "glove":
+        glove_dir_env = os.getenv("GLOVE_DIR")
+        if not glove_dir_env:
+            logger.warning("GLOVE_DIR is not set; falling back to FastText embedding backend.")
+            embedding_backend = "fasttext"
+        else:
+            glove_dir = Path(glove_dir_env).expanduser().resolve()
+            if not glove_dir.exists():
+                logger.warning(
+                    "GLOVE_DIR path %s does not exist; falling back to FastText embedding backend.",
+                    glove_dir,
+                )
+                embedding_backend = "fasttext"
+
     vec_source = align_dir / f"source_vec.{embedding_backend}.txt"
     vec_target = align_dir / f"target_vec.{embedding_backend}.txt"
 
     if embedding_backend == "glove":
         train_script = SCRIPT_ROOT / "script" / "train_glove.sh"
-        glove_dir_env = os.getenv("GLOVE_DIR")
-        if not glove_dir_env:
-            raise EnvironmentError(
-                "GLOVE_DIR environment variable must point to the Stanford GloVe repo when using the GloVe backend."
-            )
-        glove_dir = Path(glove_dir_env).expanduser().resolve()
-        if not glove_dir.exists():
-            raise FileNotFoundError(f"GLOVE_DIR path {glove_dir} does not exist.")
-
+        assert glove_dir is not None  # for mypy/static checkers
         for corpus_path, save_file in ((source_glove_path, vec_source), (target_glove_path, vec_target)):
             cmd = ["bash", str(train_script), corpus_path, str(Path(save_file).with_suffix(""))]
             logger.info("Training GloVe embeddings for %s.", corpus_path)

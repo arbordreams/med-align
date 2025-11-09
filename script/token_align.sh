@@ -16,7 +16,7 @@ if [ "${TOKALIGN_MODE}" = "medical" ]; then
     exit 1
   fi
 
-  EMBEDDING_BACKEND=${TOKALIGN_EMBEDDING_BACKEND:-glove}
+  EMBEDDING_BACKEND=${TOKALIGN_EMBEDDING_BACKEND:-fasttext}
   PIVOT_COUNT=${TOKALIGN_PIVOT_COUNT:-300}
 
   python -m src.medical_pipeline train-align \

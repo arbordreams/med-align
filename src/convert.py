@@ -25,72 +25,71 @@ def trans2switch(
     tgt_tok_path="./data/gemma-2b",
     random_shuffle=-1,
 ):
-    src_model = AutoModelForCausalLM.from_pretrained(src_clm_path, torch_dtype=torch.bfloat16, trust_remote_code=True)
+    src_model = AutoModelForCausalLM.from_pretrained(
+        src_clm_path,
+        torch_dtype=torch.float32,
+        trust_remote_code=True,
+        device_map="cpu",
+    )
     tgt_tok = AutoTokenizer.from_pretrained(tgt_tok_path,  trust_remote_code=True)
 
     # Load trans matrix
     with open(trans_path, "r") as f:
         trans = json.load(f)
     
-    src_params = dict(src_model.named_parameters())
+    with torch.no_grad():
+        src_params = dict(src_model.named_parameters())
 
-    src_embed = src_params[_EMBED_DICT[src_model.config.model_type]]
-    src_lm_head = src_params[_LMHEAD_DICT[src_model.config.model_type]]
+        src_embed = src_params[_EMBED_DICT[src_model.config.model_type]]
+        src_lm_head = src_params[_LMHEAD_DICT[src_model.config.model_type]]
 
-    assert src_embed.shape[0] == src_lm_head.shape[0]
+        assert src_embed.shape[0] == src_lm_head.shape[0]
 
-    hid_dim = src_embed.shape[1]
+        hid_dim = src_embed.shape[1]
 
-    src_len = src_embed.shape[0]
-    tgt_len = len(list(trans.keys()))
+        src_len = src_embed.shape[0]
+        tgt_len = len(list(trans.keys()))
 
-    tgt_embed = torch.zeros((tgt_len, hid_dim))
-    tgt_lm_head = torch.zeros((tgt_len, hid_dim))
+        dtype = src_embed.dtype
+        tgt_embed = torch.zeros((tgt_len, hid_dim), dtype=dtype)
+        tgt_lm_head = torch.zeros((tgt_len, hid_dim), dtype=dtype)
 
-    # print(f"tgt_len:{tgt_len}, tgt_lm_head:{tgt_lm_head}")
+        missing_targets = []
 
-    #### Method 1: Re-arrange matrix
-    missing_targets = []
+        for i in range(tgt_len):
+            tj_value = trans.get(f"{i}")
+            if isinstance(tj_value, (list, tuple)):
+                tj_value = tj_value[0] if len(tj_value) > 0 else None
+            try:
+                tj = int(tj_value) if tj_value is not None else -1
+            except (TypeError, ValueError):
+                tj = -1
+            if random_shuffle > 0 and random.random() < random_shuffle:
+                tj = random.randint(0, src_len - 1)
 
-    for i in range(tgt_len):
-        tj_value = trans.get(f"{i}")
-        if isinstance(tj_value, (list, tuple)):
-            tj_value = tj_value[0] if len(tj_value) > 0 else None
-        try:
-            tj = int(tj_value) if tj_value is not None else -1
-        except (TypeError, ValueError):
-            tj = -1
-        # random_shuffle experiment
-        if random_shuffle >0 and random.random() < random_shuffle:
-            tj = random.randint(0, src_len-1)
+            if tj < 0 or tj >= src_len:
+                missing_targets.append(i)
+                tgt_embed[i] = torch.zeros(hid_dim, dtype=dtype)
+                tgt_lm_head[i] = torch.zeros(hid_dim, dtype=dtype)
+                continue
 
-        if tj < 0 or tj >= src_len:
-            missing_targets.append(i)
-            tgt_embed[i] = torch.zeros(hid_dim)
-            tgt_lm_head[i] = torch.zeros(hid_dim)
-            continue
+            tgt_embed[i] = src_embed[tj]
+            tgt_lm_head[i] = src_lm_head[tj]
 
-        tgt_embed[i] = src_embed[tj]
-        tgt_lm_head[i] = src_lm_head[tj]
+        if missing_targets:
+            print(
+                f"[convert] Initialized {len(missing_targets)} target tokens with zeros because they mapped "
+                f"outside the source vocabulary (max index {src_len - 1}). First few: {missing_targets[:10]}"
+            )
 
-    if missing_targets:
-        print(
-            f"[convert] Initialized {len(missing_targets)} target tokens with zeros because they mapped "
-            f"outside the source vocabulary (max index {src_len - 1}). First few: {missing_targets[:10]}"
-        )
+        src_model.resize_token_embeddings(tgt_len)
 
-    # The length of tokenizer is different with the real vocab size, thus the tgt_len is used.
-    src_model.resize_token_embeddings(tgt_len)
+        src_params[_EMBED_DICT[src_model.config.model_type]] = tgt_embed.to(dtype)
+        src_params[_LMHEAD_DICT[src_model.config.model_type]] = tgt_lm_head.to(dtype)
 
-    src_params[_EMBED_DICT[src_model.config.model_type]] = tgt_embed.to(torch.bfloat16)
-    src_params[_LMHEAD_DICT[src_model.config.model_type]] = tgt_lm_head.to(torch.bfloat16)
-
-    # print(f"Load resized parameters ...")
-    src_model.load_state_dict(src_params)
-    # print(f"Save parameters into {tgt_clm_path} ...")
-    src_model.save_pretrained(tgt_clm_path)
-    # print(f"Save tokenizer into {tgt_clm_path} ...")
-    tgt_tok.save_pretrained(tgt_clm_path)
+        src_model.load_state_dict(src_params)
+        src_model.save_pretrained(tgt_clm_path)
+        tgt_tok.save_pretrained(tgt_clm_path)
 
 def random_permute(
     src_clm_path="./data/pythia-1b",
@@ -101,38 +100,43 @@ def random_permute(
     random.seed(seed)
     set_seed(seed)
 
-    src_model = AutoModelForCausalLM.from_pretrained(src_clm_path, torch_dtype=torch.bfloat16, trust_remote_code=True)
+    src_model = AutoModelForCausalLM.from_pretrained(
+        src_clm_path,
+        torch_dtype=torch.float32,
+        trust_remote_code=True,
+        device_map="cpu",
+    )
     tgt_tok = AutoTokenizer.from_pretrained(tgt_tok_path,  trust_remote_code=True)
 
-    src_params = dict(src_model.named_parameters())
+    with torch.no_grad():
+        src_params = dict(src_model.named_parameters())
 
-    src_embed = src_params[_EMBED_DICT[src_model.config.model_type]]
-    src_lm_head = src_params[_LMHEAD_DICT[src_model.config.model_type]]
+        src_embed = src_params[_EMBED_DICT[src_model.config.model_type]]
+        src_lm_head = src_params[_LMHEAD_DICT[src_model.config.model_type]]
 
-    assert src_embed.shape[0] == src_lm_head.shape[0]
+        assert src_embed.shape[0] == src_lm_head.shape[0]
 
-    src_len, hid_dim = src_embed.shape[0], src_embed.shape[1]
+        src_len, hid_dim = src_embed.shape[0], src_embed.shape[1]
 
-    tgt_len = len(tgt_tok)
+        tgt_len = len(tgt_tok)
 
-    tgt_embed = torch.zeros((tgt_len, hid_dim))
-    tgt_lm_head = torch.zeros((tgt_len, hid_dim))
+        dtype = src_embed.dtype
+        tgt_embed = torch.zeros((tgt_len, hid_dim), dtype=dtype)
+        tgt_lm_head = torch.zeros((tgt_len, hid_dim), dtype=dtype)
 
-    #### Method 1: Re-arrange matrix
-    for i in range(tgt_len):
-        tj = random.randint(0, src_len-1)
+        for i in range(tgt_len):
+            tj = random.randint(0, src_len - 1)
+            tgt_embed[i] = src_embed[tj]
+            tgt_lm_head[i] = src_lm_head[tj]
 
-        tgt_embed[i] = src_embed[tj]
-        tgt_lm_head[i] = src_lm_head[tj]
+        src_model.resize_token_embeddings(len(tgt_tok))
 
-    src_model.resize_token_embeddings(len(tgt_tok))
+        src_params[_EMBED_DICT[src_model.config.model_type]] = tgt_embed.to(dtype)
+        src_params[_LMHEAD_DICT[src_model.config.model_type]] = tgt_lm_head.to(dtype)
 
-    src_params[_EMBED_DICT[src_model.config.model_type]] = tgt_embed.to(torch.bfloat16)
-    src_params[_LMHEAD_DICT[src_model.config.model_type]] = tgt_lm_head.to(torch.bfloat16)
-
-    src_model.load_state_dict(src_params)
-    src_model.save_pretrained(tgt_clm_path)
-    tgt_tok.save_pretrained(tgt_clm_path)
+        src_model.load_state_dict(src_params)
+        src_model.save_pretrained(tgt_clm_path)
+        tgt_tok.save_pretrained(tgt_clm_path)
 
 def random_initial_all(
     src_clm_path="./data/pythia-1b",
@@ -143,32 +147,39 @@ def random_initial_all(
     random.seed(seed)
     set_seed(seed)
 
-    src_model = AutoModelForCausalLM.from_pretrained(src_clm_path, torch_dtype=torch.bfloat16, trust_remote_code=True)
+    src_model = AutoModelForCausalLM.from_pretrained(
+        src_clm_path,
+        torch_dtype=torch.float32,
+        trust_remote_code=True,
+        device_map="cpu",
+    )
     tgt_tok = AutoTokenizer.from_pretrained(tgt_tok_path,  trust_remote_code=True)
     
-    src_params = dict(src_model.named_parameters())
+    with torch.no_grad():
+        src_params = dict(src_model.named_parameters())
 
-    src_embed = src_params[_EMBED_DICT[src_model.config.model_type]]
-    src_lm_head = src_params[_LMHEAD_DICT[src_model.config.model_type]]
+        src_embed = src_params[_EMBED_DICT[src_model.config.model_type]]
+        src_lm_head = src_params[_LMHEAD_DICT[src_model.config.model_type]]
 
-    assert src_embed.shape[0] == src_lm_head.shape[0]
+        assert src_embed.shape[0] == src_lm_head.shape[0]
 
-    src_len, hid_dim = src_embed.shape[0], src_embed.shape[1]
+        src_len, hid_dim = src_embed.shape[0], src_embed.shape[1]
+        dtype = src_embed.dtype
 
-    tgt_len = len(tgt_tok)
+        tgt_len = len(tgt_tok)
 
-    src_model.resize_token_embeddings(src_len + tgt_len)
+        src_model.resize_token_embeddings(src_len + tgt_len)
 
-    resized_params = dict(src_model.named_parameters())
+        resized_params = dict(src_model.named_parameters())
 
-    src_params[_EMBED_DICT[src_model.config.model_type]] = resized_params[_EMBED_DICT[src_model.config.model_type]][src_len:]
-    src_params[_LMHEAD_DICT[src_model.config.model_type]] = resized_params[_LMHEAD_DICT[src_model.config.model_type]][src_len:]
+        src_params[_EMBED_DICT[src_model.config.model_type]] = resized_params[_EMBED_DICT[src_model.config.model_type]][src_len:].to(dtype)
+        src_params[_LMHEAD_DICT[src_model.config.model_type]] = resized_params[_LMHEAD_DICT[src_model.config.model_type]][src_len:].to(dtype)
 
-    src_model.resize_token_embeddings(tgt_len)
+        src_model.resize_token_embeddings(tgt_len)
 
-    src_model.load_state_dict(src_params)
-    src_model.save_pretrained(tgt_clm_path)
-    tgt_tok.save_pretrained(tgt_clm_path)
+        src_model.load_state_dict(src_params)
+        src_model.save_pretrained(tgt_clm_path)
+        tgt_tok.save_pretrained(tgt_clm_path)
 
 
 def random_initial_aug(
@@ -180,13 +191,18 @@ def random_initial_aug(
     random.seed(seed)
     set_seed(seed)
 
-    src_model = AutoModelForCausalLM.from_pretrained(src_clm_path, torch_dtype=torch.bfloat16, trust_remote_code=True)
+    src_model = AutoModelForCausalLM.from_pretrained(
+        src_clm_path,
+        torch_dtype=torch.float32,
+        trust_remote_code=True,
+        device_map="cpu",
+    )
     tgt_tok = AutoTokenizer.from_pretrained(tgt_tok_path,  trust_remote_code=True)
 
-    src_model.resize_token_embeddings(len(tgt_tok))
-
-    src_model.save_pretrained(tgt_clm_path)
-    tgt_tok.save_pretrained(tgt_clm_path)
+    with torch.no_grad():
+        src_model.resize_token_embeddings(len(tgt_tok))
+        src_model.save_pretrained(tgt_clm_path)
+        tgt_tok.save_pretrained(tgt_clm_path)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
