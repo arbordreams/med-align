@@ -243,10 +243,19 @@ def train_embeddings_and_align(
             )
             model.save_model(str(save_file.with_suffix(".bin")))
             words = model.get_words(include_freq=True)
+            if isinstance(words, tuple):
+                word_iterable = zip(*words)
+            else:
+                word_iterable = words
             with open(save_file, "w", encoding="utf-8") as fp:
-                for entry in words:
-                    # entry may be "word" or ("word", freq) depending on fasttext build
-                    word = entry[0] if isinstance(entry, (tuple, list)) else entry
+                for entry in word_iterable:
+                    # entry may be "word", ("word", freq), or a non-string ID depending on the fasttext build
+                    if isinstance(entry, (tuple, list)):
+                        word = entry[0]
+                    else:
+                        word = entry
+                    if not isinstance(word, str):
+                        word = str(word)
                     vector = model.get_word_vector(word)
                     fp.write(word + " " + " ".join(map(str, vector.tolist())) + "\n")
 
