@@ -23,7 +23,7 @@ pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
 pip install -r requirements.txt
 ```
 
-Linux-only extras (`deepspeed`, `bitsandbytes`, `flash-attn`) are guarded by environment markers and will be skipped automatically on unsupported platforms. A helper script (`install_deps.sh`) is also available if you prefer a single command that performs these steps.
+Linux-only extras (`deepspeed`, `bitsandbytes`) are guarded by environment markers and will be skipped automatically on unsupported platforms. `flash-attn` is installed best-effort by the helper script and is optional for the medical pipeline.
 
 ### Prepare tokenized data (parallel mode)
 

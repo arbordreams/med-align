@@ -19,5 +19,10 @@ grep -v "^torch==" requirements.txt > /tmp/requirements_no_torch.txt || true
 pip install -r /tmp/requirements_no_torch.txt
 rm /tmp/requirements_no_torch.txt
 
+echo "Attempting optional flash-attn install (skipped on failure)..."
+if ! pip install --no-build-isolation flash-attn==2.5.0; then
+  echo "flash-attn installation failed; continuing without it."
+fi
+
 echo "Installation complete!"
 
