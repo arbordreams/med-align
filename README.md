@@ -16,7 +16,7 @@ conda activate tokalign
 pip install -r requirements.txt
 ```
 
-### Prepare tokenized data
+### Prepare tokenized data (parallel mode)
 
 1. Download and merge multilingual, code, and math data, e.g., [CulturaX](https://huggingface.co/datasets/uonlp/CulturaX), [the-stack](https://huggingface.co/datasets/bigcode/the-stack) and [proof-pile-2](https://huggingface.co/datasets/EleutherAI/proof-pile-2) from HuggingFace. We provide a small corpus in the "./data/pretrain-corpus" directory for example. 
 
@@ -26,6 +26,103 @@ pip install -r requirements.txt
 vim script/convert2glove_corpus.sh 
 bash script/convert2glove_corpus.sh 
 ```
+
+### Medical monolingual pipeline
+
+The medical adaptation ingests JSONL shards where each line is `{"text": ...}` and
+reuses the same text for both source and target tokenizers. Set
+`TOKALIGN_MODE=medical` to activate the new flow:
+
+```
+export TOKALIGN_MODE=medical
+export MEDICAL_INPUTS="/abs/path/to/medical/shard_dir"
+export TOKENIZER_PATH1="EleutherAI/pythia-1b"
+export TOKENIZER_PATH2="google/gemma-2b"
+export MODLE_PATH1="EleutherAI/pythia-1b"
+export GLOVE_DIR="/abs/path/to/GloVe"  # contains compiled binaries
+
+# Optional knobs
+export MEDICAL_BYTE_BUDGET=$((5 * 1024 * 1024 * 1024))   # 5GB limit
+export MEDICAL_TERM_TOP_K=800
+export TOKALIGN_EMBEDDING_BACKEND=fasttext  # default is glove
+
+# Stage 1: aggregate corpus, mine medical terms, tokenize with mirrored text.
+bash script/convert2glove_corpus.sh
+
+# Stage 2: train embeddings + compute alignment (identical corpora on both sides).
+bash script/token_align.sh
+
+# Stage 3: apply alignment to initialise the adapted model.
+bash script/init_model.sh
+```
+
+All medical artefacts are routed to `runs/tokenizer_adapt/<timestamp>/`, including:
+
+- `corpus/medical_corpus.jsonl` and `corpus/medical_pairs.jsonl`
+- augmented tokenizers under `tokenizers/{source,target}`
+- embedding corpora (`glove_corpus/`), learned vectors, and `alignment/alignment_report.json`
+- the adapted model weights in `adapted_model/`
+
+Medical-specific logic (deduplication, mirrored tokenization, fast term mining)
+is guarded by the `TOKALIGN_MODE` flag, leaving the original parallel flow
+intact for backwards compatibility.
+
+#### End-to-end runner
+
+For automation, the Python runner sequences the entire medical pipeline with
+retry-aware stages and evaluation hooks:
+
+```
+python script/run_medical_pipeline.py \
+  --input /abs/path/to/medical/shard_dir \
+  --source-tokenizer EleutherAI/pythia-1b \
+  --target-tokenizer google/gemma-2b \
+  --source-model EleutherAI/pythia-1b \
+  --embedding-backend glove \
+  --evaluation-dataset medical_benchmark:test \
+  --evaluate
+```
+
+Logs are written under `runs/logs/` and a roll-up summary can be found in
+`runs/tokenizer_adapt/<timestamp>/pipeline_summary.json`.
+
+#### Curated medical corpus builder
+
+To avoid parsing mismatches, TokAlign ships with a dataset registry and builder
+that fetches vetted Hugging Face corpora, normalizes them to JSONL, and
+produces an aggregated shard compatible with the medical pipeline.
+
+Supported dataset slugs (see `src/medical_corpus_registry.py` for details):
+
+- `pubmed_abstracts` — `allenai/pubmed-abstracts` (title + abstract, CC BY 4.0)
+- `mimic_iii_notes` — `WangLab/MIMIC-III-Notes` (requires `HF_TOKEN`)
+- `biomed_articles` — `StanfordAIMI/biomed-scholarly-articles` (CC BY-NC)
+- `biodrops_guidelines` — `biomedical-foundation-models/BioDROPS` (CC BY)
+
+Usage:
+
+```bash
+export MAIN_DIR=/abs/path/to/TokAlign
+export HF_TOKEN=hf_xxxxxxxx          # required for gated datasets like MIMIC
+cd $MAIN_DIR
+
+# Optional filters:
+# export MEDICAL_DATASETS="pubmed_abstracts biomed_articles"
+# export MEDICAL_MAX_SAMPLES=100000
+bash script/build_medical_corpus.sh
+```
+
+The builder writes a manifest and aggregated corpus under
+`runs/corpora/default_medical/`. To feed TokAlign medical mode:
+
+```bash
+export MEDICAL_INPUTS="$MAIN_DIR/runs/corpora/default_medical/aggregated/medical_corpus.jsonl"
+```
+
+The manifest (`manifest.json`) records dataset checksums, licenses, and any
+skipped resources so runs remain auditable. Adjust `MEDICAL_CORPUS_DIR` to
+change the output location, and use `MEDICAL_DEDUP=0` if you want to inspect the
+raw merged shards without deduplication.
 
 ### Train GloVe vectors and obtain token alignment matrix
 
@@ -49,6 +146,28 @@ bash script/eval_align.sh
 vim script/init_model.sh 
 bash script/init_model.sh 
 ```
+
+### Evaluation hooks
+
+The medical pipeline ships with a lightweight perplexity evaluator that accepts
+Hugging Face datasets. When datasets are not yet available the script records a
+placeholder requesting the required benchmark names.
+
+```
+python src/eval_medical.py \
+  --model runs/tokenizer_adapt/<timestamp>/adapted_model \
+  --tokenizer runs/tokenizer_adapt/<timestamp>/tokenizers/target \
+  --dataset medical_benchmark:test \
+  --output runs/tokenizer_adapt/<timestamp>/evaluation.json
+```
+
+### Expected gains with medical alignment
+
+By mining domain-specific terminology and mirroring the corpus across both
+tokenizers, TokAlign accelerates convergence on medical language modelling
+tasks. The adaptation is designed to reduce the number of OOV fragments and to
+retain the safety guard-rails of the original model while improving recall on
+high-frequency terms from the medical corpus.
 
 ### Vocabulary Adaptation
 ```

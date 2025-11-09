@@ -226,10 +226,14 @@ class DataTrainingArguments:
             raise ValueError("Need either a dataset name or a training/validation file.")
         else:
             if self.train_file is not None:
-                extension = self.train_file.split(".")[-1]
+                extension = self.train_file.split(".")[-1].lower()
+                if extension == "jsonl":
+                    extension = "json"
                 assert extension in ["csv", "json", "txt"], "`train_file` should be a csv, a json or a txt file."
             if self.validation_file is not None:
-                extension = self.validation_file.split(".")[-1]
+                extension = self.validation_file.split(".")[-1].lower()
+                if extension == "jsonl":
+                    extension = "json"
                 assert extension in ["csv", "json", "txt"], "`validation_file` should be a csv, a json or a txt file."
 
 
@@ -278,6 +282,9 @@ def prepare_dataset(tokenizer, data_args, model_args, training_args, logger):
             if data_args.train_file is not None
             else data_args.validation_file.split(".")[-1]
         )
+        extension = extension.lower()
+        if extension == "jsonl":
+            extension = "json"
         if extension == "txt":
             extension = "text"
             dataset_args["keep_linebreaks"] = data_args.keep_linebreaks

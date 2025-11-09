@@ -1,8 +1,46 @@
 #!/bin/sh
 
+# Retains the original parallel alignment flow as the default. Setting
+# TOKALIGN_MODE=medical switches to the monolingual medical pipeline while
+# still falling back to the upstream behaviour when unset.
+
 export MAIN_DIR="/path/2/TokAlign/"
 # git clone https://github.com/stanfordnlp/GloVe.git
 export GLOVE_DIR="/path/2/glove"
+
+TOKALIGN_MODE=${TOKALIGN_MODE:-parallel}
+
+if [ "${TOKALIGN_MODE}" = "medical" ]; then
+  if [ -z "${TOKALIGN_RUN_DIR}" ]; then
+    echo "[TokAlign] TOKALIGN_RUN_DIR must be set (see convert2glove_corpus.sh medical branch)."
+    exit 1
+  fi
+
+  EMBEDDING_BACKEND=${TOKALIGN_EMBEDDING_BACKEND:-glove}
+  PIVOT_COUNT=${TOKALIGN_PIVOT_COUNT:-300}
+
+  python -m src.medical_pipeline train-align \
+    --run-dir "${TOKALIGN_RUN_DIR}" \
+    --source-glove "${GLOVE_TRAIN_PATH1}" \
+    --target-glove "${GLOVE_TRAIN_PATH2}" \
+    --tokenizer-source "${TOKENIZER_PATH1}" \
+    --tokenizer-target "${TOKENIZER_PATH2}" \
+    --embedding-backend "${EMBEDDING_BACKEND}" \
+    --pivot-count "${PIVOT_COUNT}"
+
+  export GLOVE_VECTOR_PATH1="${TOKALIGN_RUN_DIR}/alignment/source_vec.${EMBEDDING_BACKEND}.txt"
+  export GLOVE_VECTOR_PATH2="${TOKALIGN_RUN_DIR}/alignment/target_vec.${EMBEDDING_BACKEND}.txt"
+  export TGT_ID_2_SRC_ID_RES_PATH="${TOKALIGN_RUN_DIR}/alignment/align_matrix.json"
+  export TGT_ID_2_SRC_ID_GOLD_PATH="${TOKALIGN_RUN_DIR}/alignment/vocab_mapping.json"
+  export TOKALIGN_ALIGN_REPORT="${TOKALIGN_RUN_DIR}/alignment/alignment_report.json"
+
+  echo "[TokAlign] Medical alignment artifacts:"
+  echo "  Source vectors: ${GLOVE_VECTOR_PATH1}"
+  echo "  Target vectors: ${GLOVE_VECTOR_PATH2}"
+  echo "  Alignment matrix: ${TGT_ID_2_SRC_ID_RES_PATH}"
+  echo "  Alignment report: ${TOKALIGN_ALIGN_REPORT}"
+  exit 0
+fi
 
 export MODLE_PATH1="EleutherAI/pythia-1b"
 export TOKENIZER_PATH1="EleutherAI/pythia-1b"

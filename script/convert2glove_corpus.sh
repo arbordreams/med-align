@@ -1,8 +1,83 @@
 #!/bin/sh
 
+# The legacy parallel pipeline remains the default. Setting TOKALIGN_MODE=medical
+# reroutes the script through the JSONL medical corpus flow provided by
+# src/medical_pipeline.py without breaking existing behaviour.
+
 export MAIN_DIR="/path/2/TokAlign/"
 cd ${MAIN_DIR}
 export CACHE_DIR="${MAIN_DIR}/data/cache"
+
+TOKALIGN_MODE=${TOKALIGN_MODE:-parallel}
+
+if [ "${TOKALIGN_MODE}" = "medical" ]; then
+  if [ -z "${MEDICAL_INPUTS}" ]; then
+    echo "[TokAlign] MEDICAL_INPUTS must list JSONL files or directories when TOKALIGN_MODE=medical."
+    exit 1
+  fi
+
+  RUN_DIR=${TOKALIGN_RUN_DIR:-${MAIN_DIR}/runs/tokenizer_adapt/$(date +"%Y%m%d-%H%M%S")}
+  mkdir -p "${RUN_DIR}"
+
+  echo "[TokAlign] Medical data prep run directory: ${RUN_DIR}"
+
+  for INPUT_PATH in ${MEDICAL_INPUTS}; do
+    MEDICAL_ARGS="${MEDICAL_ARGS} --input ${INPUT_PATH}"
+  done
+
+  python -m src.medical_pipeline data-prep \
+    --run-dir "${RUN_DIR}" \
+    ${MEDICAL_ARGS} \
+    --byte-budget ${MEDICAL_BYTE_BUDGET:-0} \
+    $( [ "${MEDICAL_DEDUP:-1}" = "0" ] && echo "--no-dedup" ) \
+    --hash-name ${MEDICAL_HASH_NAME:-sha256}
+
+  TERMS_FILE="${RUN_DIR}/corpus/medical_terms.txt"
+  python -m src.medical_terms mine \
+    --corpus "${RUN_DIR}/corpus/medical_corpus.jsonl" \
+    --output "${TERMS_FILE}" \
+    --top-k ${MEDICAL_TERM_TOP_K:-500} \
+    --min-count ${MEDICAL_MIN_TERM_FREQ:-5} \
+    $( [ "${MEDICAL_USE_TFIDF:-0}" = "1" ] && echo "--use-tfidf" )
+
+  AUG_SOURCE="${RUN_DIR}/tokenizers/source"
+  AUG_TARGET="${RUN_DIR}/tokenizers/target"
+
+  python -m src.medical_terms augment \
+    --tokenizer "${TOKENIZER_PATH1}" \
+    --terms "${TERMS_FILE}" \
+    --output "${AUG_SOURCE}"
+
+  python -m src.medical_terms augment \
+    --tokenizer "${TOKENIZER_PATH2}" \
+    --terms "${TERMS_FILE}" \
+    --output "${AUG_TARGET}"
+
+  python -m src.medical_pipeline tokenize \
+    --run-dir "${RUN_DIR}" \
+    --aggregated-jsonl "${RUN_DIR}/corpus/medical_corpus.jsonl" \
+    --tokenizer-source "${AUG_SOURCE}" \
+    --tokenizer-target "${AUG_TARGET}" \
+    --tokenizer-workers ${NUM_WORKERS:-48} \
+    --tokenizer-cache "${CACHE_DIR}"
+
+  export TOKENIZER_PATH1="${AUG_SOURCE}"
+  export TOKENIZER_PATH2="${AUG_TARGET}"
+  export DATASET_PATH1="${RUN_DIR}/datasets/source"
+  export DATASET_PATH2="${RUN_DIR}/datasets/target"
+  export GLOVE_TRAIN_PATH1="${RUN_DIR}/glove_corpus/source.txt"
+  export GLOVE_TRAIN_PATH2="${RUN_DIR}/glove_corpus/target.txt"
+  export TOKALIGN_RUN_DIR="${RUN_DIR}"
+
+  echo "[TokAlign] Medical corpora prepared:"
+  echo "  Source dataset: ${DATASET_PATH1}"
+  echo "  Target dataset: ${DATASET_PATH2}"
+  echo "  Source embedding corpus: ${GLOVE_TRAIN_PATH1}"
+  echo "  Target embedding corpus: ${GLOVE_TRAIN_PATH2}"
+  exit 0
+fi
+
+# Parallel corpus fallback configuration (unchanged from upstream).
 
 # export TRAIN_FILE="${MAIN_DIR}/data/pretrain-corpus/lang-code-math-mix.json"
 # sample corpus for demonstration
