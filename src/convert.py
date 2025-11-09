@@ -50,14 +50,34 @@ def trans2switch(
     # print(f"tgt_len:{tgt_len}, tgt_lm_head:{tgt_lm_head}")
 
     #### Method 1: Re-arrange matrix
+    missing_targets = []
+
     for i in range(tgt_len):
-        tj = trans[f"{i}"]
+        tj_value = trans.get(f"{i}")
+        if isinstance(tj_value, (list, tuple)):
+            tj_value = tj_value[0] if len(tj_value) > 0 else None
+        try:
+            tj = int(tj_value) if tj_value is not None else -1
+        except (TypeError, ValueError):
+            tj = -1
         # random_shuffle experiment
         if random_shuffle >0 and random.random() < random_shuffle:
             tj = random.randint(0, src_len-1)
 
+        if tj < 0 or tj >= src_len:
+            missing_targets.append(i)
+            tgt_embed[i] = torch.zeros(hid_dim)
+            tgt_lm_head[i] = torch.zeros(hid_dim)
+            continue
+
         tgt_embed[i] = src_embed[tj]
         tgt_lm_head[i] = src_lm_head[tj]
+
+    if missing_targets:
+        print(
+            f"[convert] Initialized {len(missing_targets)} target tokens with zeros because they mapped "
+            f"outside the source vocabulary (max index {src_len - 1}). First few: {missing_targets[:10]}"
+        )
 
     # The length of tokenizer is different with the real vocab size, thus the tgt_len is used.
     src_model.resize_token_embeddings(tgt_len)
