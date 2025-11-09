@@ -86,6 +86,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source-tokenizer", required=True, help="Source tokenizer/model identifier.")
     parser.add_argument("--target-tokenizer", required=True, help="Target tokenizer/model identifier.")
     parser.add_argument("--source-model", required=True, help="Base model checkpoint for alignment.")
+    parser.add_argument(
+        "--source-model-fallback",
+        help="Fallback model path if augmented source tokenizer lacks config (default: use --source-model).",
+    )
+    parser.add_argument(
+        "--target-model-fallback",
+        help="Fallback model path if augmented target tokenizer lacks config (default: use --target-tokenizer).",
+    )
     parser.add_argument("--run-root", default="runs/tokenizer_adapt", help="Root directory for run artefacts.")
     parser.add_argument("--run-id", help="Optional run ID (timestamp used if omitted).")
     parser.add_argument("--byte-budget", type=int, default=0, help="Maximum bytes to ingest (0 = unlimited).")
@@ -114,6 +122,9 @@ def main() -> None:
     args = parse_args()
     run_dir = medical_pipeline.create_run_dir(Path(args.run_root), args.run_id)
     _setup_logging(run_dir)
+
+    source_model_fallback = args.source_model_fallback or args.source_model
+    target_model_fallback = args.target_model_fallback or args.target_tokenizer
 
     LOGGER.info("Run directory: %s", run_dir)
 
@@ -194,6 +205,8 @@ def main() -> None:
             aggregated_jsonl=aggregated_jsonl,
             tokenizer_source=augmented_source,
             tokenizer_target=augmented_target,
+            source_model_fallback=source_model_fallback,
+            target_model_fallback=target_model_fallback,
             tokenizer_workers=args.tokenizer_workers,
             tokenizer_cache_dir=args.tokenizer_cache,
         ),

@@ -43,19 +43,17 @@ from transformers import (
     default_data_collator,
     set_seed,
 )
-from transformers.testing_utils import CaptureLogger
-from transformers.trainer_utils import get_last_checkpoint
-from transformers.utils import check_min_version
-from transformers.utils.versions import require_version
+# from transformers.testing_utils import CaptureLogger
+# from transformers.trainer_utils import get_last_checkpoint
 from datasets import Features, Sequence, Value
 
 # import llama
 import pandas as pd
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.21.0.dev0")
+# check_min_version("4.21.0.dev0")
 
-require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/language-modeling/requirements.txt")
+# require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/language-modeling/requirements.txt")
 
 logger = logging.getLogger(__name__)
 
@@ -507,9 +505,13 @@ def main():
         "use_auth_token": True if model_args.use_auth_token else None,
     }
     if model_args.config_name:
-        config = AutoConfig.from_pretrained(model_args.config_name, **config_kwargs)
+    config = AutoConfig.from_pretrained(model_args.config_name or model_args.model_name_or_path, **config_kwargs)
     elif model_args.model_name_or_path:
-        config = AutoConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
+        if os.path.isfile(os.path.join(model_args.model_name_or_path, "config.json")):
+            config = AutoConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
+        else:
+            logger.warning("Unrecognized config in %s. Falling back to AutoConfig.from_pretrained with EleutherAI/pythia-1b.", model_args.model_name_or_path)
+            config = AutoConfig.from_pretrained("EleutherAI/pythia-1b", **config_kwargs)
         # config = llama.LLaMAConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
     else:
         config = CONFIG_MAPPING[model_args.model_type]()

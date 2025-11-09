@@ -101,12 +101,27 @@ def data_prep(
     return outputs
 
 
+def _resolve_tokenizer_model_path(tokenizer_path: str, fallback_model: str) -> Tuple[str, str]:
+    """
+    Determine the model_name_or_path to accompany a tokenizer clone.
+    If the directory lacks a config.json, we fall back to the provided model.
+    Returns (model_path, tokenizer_path).
+    """
+
+    local_config = Path(tokenizer_path) / "config.json"
+    if local_config.is_file():
+        return tokenizer_path, tokenizer_path
+    return fallback_model, tokenizer_path
+
+
 def tokenize_corpus(
     *,
     run_dir: Path,
     aggregated_jsonl: str,
     tokenizer_source: str,
     tokenizer_target: str,
+    source_model_fallback: str,
+    target_model_fallback: str,
     tokenizer_workers: int,
     tokenizer_cache_dir: Optional[str] = None,
     min_line_length: int = 0,
@@ -120,16 +135,17 @@ def tokenize_corpus(
     cache_dir = tokenizer_cache_dir or str(run_dir / "cache")
     os.makedirs(cache_dir, exist_ok=True)
 
-    def _tokenize(tokenizer_path: str, output_subdir: str) -> Path:
+    def _tokenize(tokenizer_path: str, output_subdir: str, fallback_model: str) -> Path:
         dataset_path = dataset_dir / output_subdir
         dataset_path.mkdir(parents=True, exist_ok=True)
+        model_path, token_path = _resolve_tokenizer_model_path(tokenizer_path, fallback_model)
         cmd = [
             sys.executable,
             str(SCRIPT_ROOT / "src" / "process_dataset.py"),
             "--model_name_or_path",
-            tokenizer_path,
+            model_path,
             "--tokenizer_name",
-            tokenizer_path,
+            token_path,
             "--train_file",
             aggregated_jsonl,
             "--only_tokenize",
@@ -146,8 +162,8 @@ def tokenize_corpus(
         _run_subprocess(cmd)
         return dataset_path
 
-    source_dataset = _tokenize(tokenizer_source, "source")
-    target_dataset = _tokenize(tokenizer_target, "target")
+    source_dataset = _tokenize(tokenizer_source, "source", source_model_fallback)
+    target_dataset = _tokenize(tokenizer_target, "target", target_model_fallback)
 
     def _convert(dataset_path: Path, output_file: Path) -> Path:
         cmd = [
