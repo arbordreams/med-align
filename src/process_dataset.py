@@ -28,7 +28,7 @@ from typing import Optional, Any, Dict, List, Optional
 from collections.abc import Mapping
 
 import datasets
-from datasets import load_dataset, load_metric
+from datasets import load_dataset
 
 import transformers
 from transformers import (
