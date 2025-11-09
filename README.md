@@ -94,10 +94,10 @@ produces an aggregated shard compatible with the medical pipeline.
 
 Supported dataset slugs (see `src/medical_corpus_registry.py` for details):
 
-- `pubmed_abstracts` — `allenai/pubmed-abstracts` (title + abstract, CC BY 4.0)
-- `mimic_iii_notes` — `WangLab/MIMIC-III-Notes` (requires `HF_TOKEN`)
-- `biomed_articles` — `StanfordAIMI/biomed-scholarly-articles` (CC BY-NC)
-- `biodrops_guidelines` — `biomedical-foundation-models/BioDROPS` (CC BY)
+- `pubmed_oa` — `ncbi/pubmed-oa-subset` (Open Access PubMed articles, CC BY)
+- `pubmed_summarization` — `ccdv/pubmed-summarization` (article + abstract pairs, CC BY 4.0)
+- `clinical_trials` — `huggingface/clinical-trials` (ClinicalTrials.gov descriptions, CC0)
+- `med_dialog` — `health-ai/MedDialog` (English doctor-patient dialogues, CC BY 4.0)
 
 Usage:
 

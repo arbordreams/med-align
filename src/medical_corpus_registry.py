@@ -48,42 +48,41 @@ class DatasetSpec:
 
 
 DATASET_REGISTRY: Dict[str, DatasetSpec] = {
-    "pubmed_abstracts": DatasetSpec(
-        slug="pubmed_abstracts",
-        dataset_id="allenai/pubmed-abstracts",
+    "pubmed_oa": DatasetSpec(
+        slug="pubmed_oa",
+        dataset_id="ncbi/pubmed-oa-subset",
         config_name=None,
         split="train",
-        text_fields=("title", "abstract"),
+        text_fields=("text",),
+        license="CC BY",
+        description="PubMed Open Access subset provided by NCBI.",
+    ),
+    "pubmed_summarization": DatasetSpec(
+        slug="pubmed_summarization",
+        dataset_id="ccdv/pubmed-summarization",
+        config_name=None,
+        split="train",
+        text_fields=("article", "abstract"),
         license="CC BY 4.0",
-        description="PubMed abstracts curated by AllenAI (title + abstract).",
+        description="PubMed article paragraphs paired with abstracts.",
     ),
-    "mimic_iii_notes": DatasetSpec(
-        slug="mimic_iii_notes",
-        dataset_id="WangLab/MIMIC-III-Notes",
+    "clinical_trials": DatasetSpec(
+        slug="clinical_trials",
+        dataset_id="huggingface/clinical-trials",
         config_name=None,
         split="train",
         text_fields=("text",),
-        license="PhysioNet Credentialed Health Data License",
-        description="De-identified hospital notes from MIMIC-III.",
-        requires_auth=True,
+        license="CC0",
+        description="ClinicalTrials.gov descriptions curated by Hugging Face.",
     ),
-    "biomed_articles": DatasetSpec(
-        slug="biomed_articles",
-        dataset_id="StanfordAIMI/biomed-scholarly-articles",
-        config_name=None,
+    "med_dialog": DatasetSpec(
+        slug="med_dialog",
+        dataset_id="health-ai/MedDialog",
+        config_name="en",
         split="train",
-        text_fields=("text",),
-        license="CC BY-NC 4.0",
-        description="Biomedical scholarly article passages (Stanford AIMI).",
-    ),
-    "biodrops_guidelines": DatasetSpec(
-        slug="biodrops_guidelines",
-        dataset_id="biomedical-foundation-models/BioDROPS",
-        config_name="clinical_guideline",
-        split="train",
-        text_fields=("text",),
+        text_fields=("dialogue",),
         license="CC BY 4.0",
-        description="BioDROPS clinical guideline passages.",
+        description="English doctor-patient dialogues from MedDialog.",
     ),
 }
 
