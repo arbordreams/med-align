@@ -18,6 +18,11 @@ import datasets
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+
+DEFAULT_DATASETS: List[str] = [
+    "uiyunkim-hub/pubmed-abstract:test",
+]
+
 logger = logging.getLogger(__name__)
 
 
@@ -98,10 +103,15 @@ def main() -> None:
 
     os.makedirs(Path(args.output).parent, exist_ok=True)
 
-    if not args.dataset:
+    datasets_to_evaluate: List[str] = args.dataset if args.dataset else DEFAULT_DATASETS
+
+    if not datasets_to_evaluate:
         placeholder = {
             "status": "missing_datasets",
-            "message": "No medical evaluation datasets were provided. Supply --dataset flags with Hugging Face IDs.",
+            "message": (
+                "No medical evaluation datasets were provided and no defaults are configured. "
+                "Supply --dataset flags with Hugging Face IDs."
+            ),
         }
         with open(args.output, "w", encoding="utf-8") as fp:
             json.dump(placeholder, fp, indent=2)
@@ -110,7 +120,7 @@ def main() -> None:
         return
 
     results = {}
-    for dataset_item in args.dataset:
+    for dataset_item in datasets_to_evaluate:
         if ":" in dataset_item:
             dataset_name, split = dataset_item.split(":", maxsplit=1)
         else:
