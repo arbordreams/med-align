@@ -24,7 +24,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 try:
     from . import medical_corpus  # type: ignore
@@ -169,13 +169,13 @@ def tokenize_corpus(
         cmd = [
             sys.executable,
             str(SCRIPT_ROOT / "src" / "convert2glove_train.py"),
-            "--source_path",
+            "-s",
             str(dataset_path),
-            "--key",
+            "-k",
             "train",
-            "--output_path",
+            "-o",
             str(output_file),
-            "--min_line_length",
+            "-m",
             str(min_line_length),
         ]
         logger.info("Generating embedding corpus at %s.", output_file)
