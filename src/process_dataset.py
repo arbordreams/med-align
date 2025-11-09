@@ -505,14 +505,18 @@ def main():
         "use_auth_token": True if model_args.use_auth_token else None,
     }
     if model_args.config_name:
-    config = AutoConfig.from_pretrained(model_args.config_name or model_args.model_name_or_path, **config_kwargs)
+        config = AutoConfig.from_pretrained(model_args.config_name, **config_kwargs)
     elif model_args.model_name_or_path:
-        if os.path.isfile(os.path.join(model_args.model_name_or_path, "config.json")):
-            config = AutoConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
+        candidate_path = model_args.model_name_or_path
+        local_config = os.path.join(candidate_path, "config.json")
+        if os.path.isfile(local_config):
+            config = AutoConfig.from_pretrained(candidate_path, **config_kwargs)
         else:
-            logger.warning("Unrecognized config in %s. Falling back to AutoConfig.from_pretrained with EleutherAI/pythia-1b.", model_args.model_name_or_path)
+            logger.warning(
+                "Unrecognized config in %s. Falling back to AutoConfig.from_pretrained with EleutherAI/pythia-1b.",
+                candidate_path,
+            )
             config = AutoConfig.from_pretrained("EleutherAI/pythia-1b", **config_kwargs)
-        # config = llama.LLaMAConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
     else:
         config = CONFIG_MAPPING[model_args.model_type]()
         logger.warning("You are instantiating a new config instance from scratch.")
