@@ -41,20 +41,23 @@ def evaluate_perplexity(
     model = AutoModelForCausalLM.from_pretrained(model_path, dtype=torch.float32)
     model.eval()
 
-    ds = datasets.load_dataset(dataset_name, split=split)
-    if max_samples:
-        ds = ds.select(range(min(max_samples, len(ds))))
-
+    # Use streaming to avoid downloading entire large datasets
+    ds = datasets.load_dataset(dataset_name, split=split, streaming=True)
+    
     losses: List[float] = []
+    count = 0
     for example in ds:
-        text = example.get("text") or example.get("document") or ""
+        if max_samples and count >= max_samples:
+            break
+        text = example.get("text") or example.get("document") or example.get("abstract") or ""
         if not text:
             continue
-        inputs = tokenizer(text, return_tensors="pt")
+        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
         with torch.no_grad():
             output = model(**inputs, labels=inputs["input_ids"])
             loss = float(output.loss.detach().cpu())
             losses.append(loss)
+        count += 1
 
     if not losses:
         return float("nan")
