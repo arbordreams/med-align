@@ -228,6 +228,240 @@ def evaluate_perplexity(
     return perplexity
 
 
+def _load_model_with_fallbacks(model_path: str, tokenizer: AutoTokenizer) -> AutoModelForCausalLM:
+    """
+    Load model with progressive fallbacks to avoid CUDA device-side asserts.
+    """
+    def _load_and_smoke_test(torch_dtype: torch.dtype, use_flash: bool) -> AutoModelForCausalLM | None:
+        try:
+            cfg = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+            if use_flash and hasattr(cfg, "attn_implementation"):
+                setattr(cfg, "attn_implementation", "flash_attention_2")
+            model_local = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                config=cfg if use_flash else None,
+                torch_dtype=torch_dtype,
+                trust_remote_code=True,
+            )
+        except Exception:
+            try:
+                model_local = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    torch_dtype=torch_dtype,
+                    trust_remote_code=True,
+                )
+            except Exception:
+                return None
+        try:
+            model_local.to("cuda").eval()
+            with torch.inference_mode(), torch.autocast("cuda", dtype=torch_dtype if torch_dtype != torch.float32 else torch.float32):
+                _ = model_local(**tokenizer("hello world", return_tensors="pt", truncation=True, max_length=8).to("cuda"))
+            return model_local
+        except Exception:
+            try:
+                del model_local  # type: ignore
+            except Exception:
+                pass
+            torch.cuda.empty_cache()
+            return None
+
+    model = (
+        _load_and_smoke_test(torch.bfloat16, use_flash=True)
+        or _load_and_smoke_test(torch.float16, use_flash=False)
+        or _load_and_smoke_test(torch.float32, use_flash=False)
+    )
+    if model is None:
+        raise RuntimeError("Failed to load model on CUDA for evaluation after multiple fallbacks.")
+    return model
+
+
+def evaluate_pubmedqa(
+    *,
+    model_path: str,
+    tokenizer_path: str,
+    subset: str = "pqa_labeled",
+    split: str = "test",
+    max_samples: int | None = 200,
+) -> dict:
+    """
+    Simple zero-shot PubMedQA accuracy using conditional likelihood over {yes,no,maybe}.
+    """
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA required for eval")
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    model = _load_model_with_fallbacks(model_path, tokenizer)
+    dtype = next(model.parameters()).dtype
+
+    # Load dataset with fallback splits
+    import datasets as _ds
+    def _load(split_name: str):
+        return _ds.load_dataset("qiaojin/pubmed-qa", subset, split=split_name, streaming=True)
+    try:
+        ds = _load(split)
+    except Exception:
+        for fb in ("validation", "train"):
+            try:
+                logger.warning("Requested PubMedQA split '%s' unavailable; falling back to '%s'.", split, fb)
+                ds = _load(fb)
+                break
+            except Exception:
+                continue
+        else:
+            raise
+    labels = ["yes", "no", "maybe"]
+    correct = 0
+    total = 0
+    per_class = {k: {"correct": 0, "total": 0} for k in labels}
+    def _score_answer(prompt: str, answer: str) -> float:
+        # Compute negative loss over answer tokens only
+        full = f"{prompt} {answer}"
+        enc_full = tokenizer(full, return_tensors="pt", truncation=True, max_length=256)
+        enc_prompt = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=256)
+        input_ids = enc_full["input_ids"][0]
+        cutoff = enc_prompt["input_ids"].shape[1]
+        labels_ids = input_ids.clone()
+        labels_ids[:cutoff] = -100  # ignore prompt tokens
+        with torch.inference_mode(), torch.autocast("cuda", dtype=dtype if dtype != torch.float32 else torch.float32):
+            out = model(input_ids=enc_full["input_ids"].to("cuda"), labels=labels_ids.unsqueeze(0).to("cuda"))
+        return -float(out.loss.detach().cpu())
+
+    for example in ds:
+        if max_samples and total >= max_samples:
+            break
+        question = example.get("question") or example.get("quest") or ""
+        ctx = example.get("context") or example.get("contexts") or ""
+        label = (example.get("final_decision") or example.get("label") or "").strip().lower()
+        if label not in labels or not question:
+            continue
+        prompt = f"Question: {question}\nContext: {ctx}\nAnswer:"
+        scores = {ans: _score_answer(prompt, ans) for ans in labels}
+        pred = max(scores, key=scores.get)
+        total += 1
+        per_class[label]["total"] += 1
+        if pred == label:
+            correct += 1
+            per_class[label]["correct"] += 1
+    acc = float(correct) / total if total else float("nan")
+    return {"accuracy": acc, "total": total, "per_class": {k: {"accuracy": (v["correct"] / v["total"]) if v["total"] else float("nan"), "total": v["total"]} for k, v in per_class.items()}}
+
+def _load_model_with_fallbacks(model_path: str, tokenizer: AutoTokenizer) -> AutoModelForCausalLM:
+    # Internal helper shared by QA eval to reuse robust loading pattern.
+    def _load_and_smoke_test(torch_dtype: torch.dtype, use_flash: bool) -> AutoModelForCausalLM | None:
+        try:
+            cfg = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+            if use_flash and hasattr(cfg, "attn_implementation"):
+                setattr(cfg, "attn_implementation", "flash_attention_2")
+            model_local = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                config=cfg if use_flash else None,
+                torch_dtype=torch_dtype,
+                trust_remote_code=True,
+            )
+        except Exception:
+            try:
+                model_local = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    torch_dtype=torch_dtype,
+                    trust_remote_code=True,
+                )
+            except Exception:
+                return None
+        try:
+            model_local.to("cuda").eval()
+            with torch.inference_mode(), torch.autocast("cuda", dtype=torch_dtype if torch_dtype != torch.float32 else torch.float32):
+                _ = model_local(**tokenizer("hello world", return_tensors="pt", truncation=True, max_length=8).to("cuda"))
+            return model_local
+        except Exception:
+            try:
+                del model_local  # type: ignore
+            except Exception:
+                pass
+            torch.cuda.empty_cache()
+            return None
+
+    model = (
+        _load_and_smoke_test(torch.bfloat16, use_flash=True)
+        or _load_and_smoke_test(torch.float16, use_flash=False)
+        or _load_and_smoke_test(torch.float32, use_flash=False)
+    )
+    if model is None:
+        raise RuntimeError("Failed to load model on CUDA for evaluation after multiple fallbacks.")
+    return model
+
+
+def evaluate_pubmedqa(
+    *,
+    model_path: str,
+    tokenizer_path: str,
+    subset: str = "pqa_labeled",
+    split: str = "test",
+    max_samples: int | None = 200,
+) -> dict:
+    """
+    Simple zero-shot PubMedQA accuracy using conditional likelihood over {yes,no,maybe}.
+    """
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA required for eval")
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    model = _load_model_with_fallbacks(model_path, tokenizer)
+    dtype = next(model.parameters()).dtype
+
+    # Load dataset with fallback splits
+    import datasets as _ds
+    def _load(split_name: str):
+        return _ds.load_dataset("qiaojin/pubmed-qa", subset, split=split_name, streaming=True)
+    try:
+        ds = _load(split)
+    except Exception:
+        for fb in ("validation", "train"):
+            try:
+                logger.warning("Requested PubMedQA split '%s' unavailable; falling back to '%s'.", split, fb)
+                ds = _load(fb)
+                break
+            except Exception:
+                continue
+        else:
+            raise
+    labels = ["yes", "no", "maybe"]
+    correct = 0
+    total = 0
+    per_class = {k: {"correct": 0, "total": 0} for k in labels}
+    def _score_answer(prompt: str, answer: str) -> float:
+        # Compute negative loss over answer tokens only
+        full = f"{prompt} {answer}"
+        enc_full = tokenizer(full, return_tensors="pt", truncation=True, max_length=256)
+        enc_prompt = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=256)
+        input_ids = enc_full["input_ids"][0]
+        cutoff = enc_prompt["input_ids"].shape[1]
+        labels_ids = input_ids.clone()
+        labels_ids[:cutoff] = -100  # ignore prompt tokens
+        with torch.inference_mode(), torch.autocast("cuda", dtype=dtype if dtype != torch.float32 else torch.float32):
+            out = model(input_ids=enc_full["input_ids"].to("cuda"), labels=labels_ids.unsqueeze(0).to("cuda"))
+        return -float(out.loss.detach().cpu())
+
+    for example in ds:
+        if max_samples and total >= max_samples:
+            break
+        question = example.get("question") or example.get("quest") or ""
+        ctx = example.get("context") or example.get("contexts") or ""
+        label = (example.get("final_decision") or example.get("label") or "").strip().lower()
+        if label not in labels or not question:
+            continue
+        prompt = f"Question: {question}\nContext: {ctx}\nAnswer:"
+        scores = {ans: _score_answer(prompt, ans) for ans in labels}
+        pred = max(scores, key=scores.get)
+        total += 1
+        per_class[label]["total"] += 1
+        if pred == label:
+            correct += 1
+            per_class[label]["correct"] += 1
+    acc = float(correct) / total if total else float("nan")
+    return {"accuracy": acc, "total": total, "per_class": {k: {"accuracy": (v["correct"] / v["total"]) if v["total"] else float("nan"), "total": v["total"]} for k, v in per_class.items()}}
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate medical TokAlign models.")
     parser.add_argument("--model", required=True, help="Path to adapted model directory.")
