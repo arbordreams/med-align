@@ -55,18 +55,29 @@ echo "[install] Installing flash-attn (prebuilt wheels only, no source build)...
 set +e
 FA_STATUS=1
 
-# Try 1: Official flash-attn wheels for 2.5.x
-echo "[install] Trying official flash-attn wheels (2.5.x) from flashattn.github.io..."
-pip install --no-cache-dir --only-binary :all: \
-  --extra-index-url https://flashattn.github.io/whl/cu128/torch2.8/ \
-  --extra-index-url https://flashattn.github.io/whl/cu121/torch2.8/ \
-  "flash-attn==2.5.*" > /tmp/flash_install.log 2>&1
+# Try 1: Direct wheel from official GitHub releases (Python 3.12, CUDA 12.8, PyTorch 2.8)
+echo "[install] Trying direct wheel from Dao-AILab/flash-attention releases..."
+WHEEL_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl"
+pip install --no-cache-dir "${WHEEL_URL}" > /tmp/flash_install.log 2>&1
 if [ $? -eq 0 ]; then
   FA_STATUS=0
-  echo "[install] Successfully installed flash-attn 2.5.x from official repo"
+  echo "[install] Successfully installed flash-attn 2.8.3 from direct wheel URL"
 fi
 
-# Try 2: Try newer compatible versions (2.6.x, 2.7.x, 2.8.x) that work with torch 2.8
+# Try 2: Official flash-attn wheels for 2.5.x (if direct wheel fails)
+if [ $FA_STATUS -ne 0 ]; then
+  echo "[install] Trying official flash-attn wheels (2.5.x) from flashattn.github.io..."
+  pip install --no-cache-dir --only-binary :all: \
+    --extra-index-url https://flashattn.github.io/whl/cu128/torch2.8/ \
+    --extra-index-url https://flashattn.github.io/whl/cu121/torch2.8/ \
+    "flash-attn==2.5.*" > /tmp/flash_install.log 2>&1
+  if [ $? -eq 0 ]; then
+    FA_STATUS=0
+    echo "[install] Successfully installed flash-attn 2.5.x from official repo"
+  fi
+fi
+
+# Try 3: Try newer compatible versions (2.6.x, 2.7.x, 2.8.x) that work with torch 2.8
 if [ $FA_STATUS -ne 0 ]; then
   echo "[install] Trying newer flash-attn versions compatible with torch 2.8..."
   for version in "2.6.*" "2.7.*" "2.8.*"; do
@@ -82,7 +93,7 @@ if [ $FA_STATUS -ne 0 ]; then
   done
 fi
 
-# Try 3: Community wheels from mjun0812 - try different CUDA versions (cu124, cu126) as fallback
+# Try 4: Community wheels from mjun0812 - try different CUDA versions (cu124, cu126) as fallback
 if [ $FA_STATUS -ne 0 ]; then
   echo "[install] Trying community wheels from mjun0812 (trying cu124/cu126 as fallback)..."
   PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')")
@@ -100,7 +111,7 @@ if [ $FA_STATUS -ne 0 ]; then
   done
 fi
 
-# Try 4: Try without version constraint to see what's available
+# Try 5: Try without version constraint to see what's available
 if [ $FA_STATUS -ne 0 ]; then
   echo "[install] Trying flash-attn without version constraint from official repo..."
   pip install --no-cache-dir --only-binary :all: \
