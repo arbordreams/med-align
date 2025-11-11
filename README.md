@@ -123,7 +123,7 @@ Logs are written under `runs/logs/` and a roll-up summary can be found in
 ### Modes: Smoke test vs Research
 
 - Smoke test (default quickstart): small corpus (~5MB), fast config for sanity checks.
-- Research mode (overnight, quality-first): 1GB corpus cap, more terms, more pivots, longer embedding training, tuned for H100.
+- Research mode (overnight, quality-first): larger corpus cap (default 5GB), more terms, more pivots, longer embedding training, tuned for H100.
 
 Run research-grade pipeline:
 
@@ -132,10 +132,10 @@ bash script/run_medical_pipeline_research.sh
 ```
 
 Key research defaults:
-- Byte budget: 1 GiB
+- Byte budget: 5 GiB
 - Term mining: top-k=2000, min-frequency=3, TF-IDF enabled
-- FastText: epochs=20, minCount=2, lr=0.05, dim=300, threads=24
-- Alignment: pivot_count=1000
+- FastText: epochs=30, minCount=1, lr=0.05, dim=300, threads=24
+- Alignment: pivot_count=2000
 - Tokenization: workers=24
 - Evaluation: perplexity and QA enabled (QA fail-soft if dataset/split missing)
 

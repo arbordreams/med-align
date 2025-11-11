@@ -97,6 +97,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-root", default="runs/tokenizer_adapt", help="Root directory for run artefacts.")
     parser.add_argument("--run-id", help="Optional run ID (timestamp used if omitted).")
     parser.add_argument("--byte-budget", type=int, default=0, help="Maximum bytes to ingest (0 = unlimited).")
+    parser.add_argument(
+        "--corpus-size-gb",
+        type=float,
+        default=1.0,
+        help="Target corpus size in GB. Research mode defaults to 5GB for better coverage.",
+    )
     parser.add_argument("--no-dedup", action="store_true", help="Disable deduplication during ingestion.")
     parser.add_argument("--hash-name", default="sha256", help="Hash algorithm for deduplication.")
     parser.add_argument("--min-term-frequency", type=int, default=5, help="Minimum term frequency.")
@@ -142,9 +148,10 @@ def main() -> None:
 
     # Apply research-grade overrides when requested. These favor quality over speed.
     if args.research_mode:
-        LOGGER.info("Research mode enabled: applying quality-first defaults for a 1GB corpus.")
-        # Corpus scale
-        args.byte_budget = 1_073_741_824  # 1 GiB
+        LOGGER.info("Research mode enabled: applying quality-first defaults for a larger corpus.")
+        # Corpus scale - prefer CLI corpus size, default to 5 GiB in research mode
+        target_gb = args.corpus_size_gb if args.corpus_size_gb > 1.0 else 5.0
+        args.byte_budget = int(target_gb * 1_073_741_824)
         # Term mining
         args.term_top_k = 2000
         args.min_term_frequency = 3
@@ -152,12 +159,12 @@ def main() -> None:
         # Tokenization throughput
         args.tokenizer_workers = max(args.tokenizer_workers, 24)
         # Alignment quality
-        args.pivot_count = max(args.pivot_count, 1000)
+        args.pivot_count = max(args.pivot_count, 2000)
         # Evaluation breadth
         args.max_eval_samples = max(args.max_eval_samples, 1000)
         # FastText training (embedding quality)
-        args.fasttext_epochs = max(args.fasttext_epochs, 20)
-        args.fasttext_mincount = min(args.fasttext_mincount, 2)
+        args.fasttext_epochs = max(args.fasttext_epochs, 30)
+        args.fasttext_mincount = 1
         args.fasttext_lr = args.fasttext_lr if args.fasttext_lr > 0 else 0.05
         args.fasttext_thread = max(args.fasttext_thread, 24)
 

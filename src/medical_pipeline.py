@@ -25,6 +25,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
+import concurrent.futures as _futures
 
 try:
     from . import medical_corpus  # type: ignore
@@ -252,27 +253,27 @@ def train_embeddings_and_align(
             logger.info("Training GloVe embeddings for %s.", corpus_path)
             _run_subprocess(cmd, cwd=glove_dir)
     else:
-        # Train FastText embeddings using python binding.
-        try:
-            import fasttext  # type: ignore[import]
-        except ImportError as exc:
-            raise RuntimeError(
-                "FastText backend selected but the `fasttext` module is unavailable. "
-                "Install the prebuilt `fasttext-wheel>=0.9.2` package (pip install fasttext-wheel)."
-            ) from exc
-
-        for corpus_path, save_file in ((source_glove_path, vec_source), (target_glove_path, vec_target)):
-            logger.info("Training FastText embeddings for %s.", corpus_path)
+        # Train FastText embeddings using python binding (parallel for source and target).
+        def _train_fasttext_embedding(corpus_path: str, save_file: str, *, epochs: int, mincount: int, lr: float, thread: int) -> str:
+            # Local import inside worker to avoid pickling issues
+            try:
+                import fasttext  # type: ignore[import]
+            except ImportError as exc:  # pragma: no cover
+                raise RuntimeError(
+                    "FastText backend selected but the `fasttext` module is unavailable. "
+                    "Install the prebuilt `fasttext-wheel>=0.9.2` package (pip install fasttext-wheel)."
+                ) from exc
             model = fasttext.train_unsupervised(
                 input=corpus_path,
                 model="skipgram",
                 dim=300,
-                epoch=fasttext_epochs,
-                minCount=fasttext_mincount,
-                lr=fasttext_lr,
+                epoch=epochs,
+                minCount=mincount,
+                lr=lr,
                 thread=thread,
             )
-            model.save_model(str(save_file.with_suffix(".bin")))
+            bin_path = str(Path(save_file).with_suffix(".bin"))
+            model.save_model(bin_path)
             words = model.get_words(include_freq=True)
             if isinstance(words, tuple):
                 word_iterable = zip(*words)
@@ -289,6 +290,34 @@ def train_embeddings_and_align(
                         word = str(word)
                     vector = model.get_word_vector(word)
                     fp.write(word + " " + " ".join(map(str, vector.tolist())) + "\n")
+            return save_file
+
+        jobs = [
+            (source_glove_path, str(vec_source)),
+            (target_glove_path, str(vec_target)),
+        ]
+        logger.info("Training FastText embeddings in parallel (workers=2).")
+        with _futures.ProcessPoolExecutor(max_workers=2) as executor:
+            future_map = {
+                executor.submit(
+                    _train_fasttext_embedding,
+                    corpus_path,
+                    save_file,
+                    epochs=fasttext_epochs,
+                    mincount=fasttext_mincount,
+                    lr=fasttext_lr,
+                    thread=thread,
+                ): (corpus_path, save_file)
+                for corpus_path, save_file in jobs
+            }
+            for future in _futures.as_completed(future_map):
+                corpus_path, save_file = future_map[future]
+                try:
+                    result_path = future.result()
+                    logger.info("FastText training complete for %s -> %s", corpus_path, result_path)
+                except Exception as exc:  # pragma: no cover - surface worker errors
+                    logger.exception("FastText training failed for %s: %s", corpus_path, exc)
+                    raise
 
     logger.info("Counting vocabulary overlaps between %s and %s.", tokenizer_source, tokenizer_target)
     vocab_count_path = align_dir / "vocab_mapping.json"
