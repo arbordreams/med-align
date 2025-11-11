@@ -76,8 +76,10 @@ import sys
 try:
     import flash_attn  # noqa: F401
     print("[install] flash-attn is installed and importable.")
-except ImportError:
-    print("[install] flash-attn not available (optional - pipeline will work without it).")
+except (ImportError, RuntimeError, OSError) as e:
+    # ImportError: not installed, RuntimeError/OSError: symbol mismatch (torch version incompatibility)
+    print(f"[install] flash-attn not available (optional - pipeline will work without it).")
+    print(f"[install] Note: {type(e).__name__}: {str(e)[:100]}")
 except Exception as e:
     print(f"[install] flash-attn check: {e}")
 PY
