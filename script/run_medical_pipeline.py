@@ -26,11 +26,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
-try:
-    from src import medical_corpus, medical_pipeline, medical_terms
-except ImportError:
-    sys.path.append(str(Path(__file__).resolve().parents[1]))
-    from src import medical_corpus, medical_pipeline, medical_terms  # type: ignore
+# Always prefer the local repository's src/ over any installed package named 'src'
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from src import medical_corpus, medical_pipeline, medical_terms  # type: ignore
 
 LOGGER = logging.getLogger("medical_runner")
 
