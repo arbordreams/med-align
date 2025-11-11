@@ -49,90 +49,21 @@ else
 fi
 rm -f "${TMP_REQ}"
 
-echo "[install] Installing flash-attn (prebuilt wheels only, no source build)..."
-# Try multiple community wheel sources - skip if not available (flash-attn is optional)
-# Use --only-binary to prevent building from source
+echo "[install] Installing flash-attn (prebuilt wheel only, no source build)..."
+# Install from direct wheel URL - skip if not available (flash-attn is optional)
 set +e
-FA_STATUS=1
-
-# Try 1: Direct wheel from official GitHub releases (Python 3.12, CUDA 12.8, PyTorch 2.8)
-echo "[install] Trying direct wheel from Dao-AILab/flash-attention releases..."
 WHEEL_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl"
-pip install --no-cache-dir "${WHEEL_URL}" > /tmp/flash_install.log 2>&1
-if [ $? -eq 0 ]; then
-  FA_STATUS=0
-  echo "[install] Successfully installed flash-attn 2.8.3 from direct wheel URL"
-fi
-
-# Try 2: Official flash-attn wheels for 2.5.x (if direct wheel fails)
-if [ $FA_STATUS -ne 0 ]; then
-  echo "[install] Trying official flash-attn wheels (2.5.x) from flashattn.github.io..."
-  pip install --no-cache-dir --only-binary :all: \
-    --extra-index-url https://flashattn.github.io/whl/cu128/torch2.8/ \
-    --extra-index-url https://flashattn.github.io/whl/cu121/torch2.8/ \
-    "flash-attn==2.5.*" > /tmp/flash_install.log 2>&1
-  if [ $? -eq 0 ]; then
-    FA_STATUS=0
-    echo "[install] Successfully installed flash-attn 2.5.x from official repo"
-  fi
-fi
-
-# Try 3: Try newer compatible versions (2.6.x, 2.7.x, 2.8.x) that work with torch 2.8
-if [ $FA_STATUS -ne 0 ]; then
-  echo "[install] Trying newer flash-attn versions compatible with torch 2.8..."
-  for version in "2.6.*" "2.7.*" "2.8.*"; do
-    pip install --no-cache-dir --only-binary :all: \
-      --extra-index-url https://flashattn.github.io/whl/cu128/torch2.8/ \
-      --extra-index-url https://flashattn.github.io/whl/cu121/torch2.8/ \
-      "flash-attn==${version}" > /tmp/flash_install.log 2>&1
-    if [ $? -eq 0 ]; then
-      FA_STATUS=0
-      echo "[install] Successfully installed flash-attn ${version} from official repo"
-      break
-    fi
-  done
-fi
-
-# Try 4: Community wheels from mjun0812 - try different CUDA versions (cu124, cu126) as fallback
-if [ $FA_STATUS -ne 0 ]; then
-  echo "[install] Trying community wheels from mjun0812 (trying cu124/cu126 as fallback)..."
-  PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')")
-  for cuda_ver in "cu128" "cu126" "cu124"; do
-    for version in "2.5.9" "2.6.3" "2.7.4" "2.8.3"; do
-      wheel_name="flash_attn-${version}+${cuda_ver}torch2.8-cp${PYTHON_VERSION}-cp${PYTHON_VERSION}-linux_x86_64.whl"
-      WHEEL_URL="https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.0.0/${wheel_name}"
-      pip install --no-cache-dir --only-binary :all: "${WHEEL_URL}" > /tmp/flash_install.log 2>&1
-      if [ $? -eq 0 ]; then
-        FA_STATUS=0
-        echo "[install] Successfully installed ${wheel_name}"
-        break 2
-      fi
-    done
-  done
-fi
-
-# Try 5: Try without version constraint to see what's available
-if [ $FA_STATUS -ne 0 ]; then
-  echo "[install] Trying flash-attn without version constraint from official repo..."
-  pip install --no-cache-dir --only-binary :all: \
-    --extra-index-url https://flashattn.github.io/whl/cu128/torch2.8/ \
-    --extra-index-url https://flashattn.github.io/whl/cu121/torch2.8/ \
-    flash-attn > /tmp/flash_install.log 2>&1
-  if [ $? -eq 0 ]; then
-    FA_STATUS=0
-    echo "[install] Successfully installed flash-attn (latest available)"
-  fi
-fi
-
-rm -f /tmp/flash_install.log
+echo "[install] Installing flash-attn 2.8.3 from Dao-AILab releases..."
+pip install --no-cache-dir "${WHEEL_URL}"
+FA_STATUS=$?
 
 if [ $FA_STATUS -ne 0 ]; then
-  echo "[install] WARNING: Prebuilt flash-attn wheels not available from any source."
+  echo "[install] WARNING: Could not install flash-attn from wheel URL."
   echo "[install] flash-attn is optional for the medical pipeline - skipping installation."
   echo "[install] The pipeline will work without it. You can install it later if needed."
-  echo "[install] To install manually, try:"
-  echo "  pip install flash-attn --find-links https://github.com/mjun0812/flash-attention-prebuild-wheels/releases"
   FA_STATUS=0  # Don't fail the install
+else
+  echo "[install] Successfully installed flash-attn 2.8.3"
 fi
 set -e
 
