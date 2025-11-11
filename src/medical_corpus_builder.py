@@ -272,7 +272,7 @@ def main() -> None:
         )
 
     manifest = {
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
         "output_dir": str(output_dir),
         "datasets": shard_entries,
         "aggregate": aggregate_entry,

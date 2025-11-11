@@ -43,7 +43,7 @@ DEFAULT_RUN_ROOT = SCRIPT_ROOT / "runs" / "tokenizer_adapt"
 
 
 def timestamp() -> str:
-    return datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    return datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
 
 
 def create_run_dir(run_root: Path = DEFAULT_RUN_ROOT, run_id: Optional[str] = None) -> Path:
@@ -59,7 +59,15 @@ def _run_subprocess(
     cwd: Optional[Path | str] = None,
 ) -> None:
     logger.debug("Executing command: %s", " ".join(cmd))
-    subprocess.run(cmd, check=True, env={**os.environ, **(env or {})}, cwd=str(cwd) if cwd else None)
+    # Ensure user-installed packages take precedence over system packages
+    user_site = os.path.expanduser("~/.local/lib/python3.12/site-packages")
+    pythonpath = os.environ.get("PYTHONPATH", "")
+    if pythonpath:
+        pythonpath = f"{user_site}:{pythonpath}"
+    else:
+        pythonpath = user_site
+    env_dict = {**os.environ, "PYTHONPATH": pythonpath, **(env or {})}
+    subprocess.run(cmd, check=True, env=env_dict, cwd=str(cwd) if cwd else None)
 
 
 def data_prep(
