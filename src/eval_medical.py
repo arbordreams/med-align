@@ -297,7 +297,14 @@ def evaluate_pubmedqa(
     # Load dataset with fallback splits
     import datasets as _ds
     def _load(split_name: str):
-        return _ds.load_dataset("qiaojin/pubmed-qa", subset, split=split_name, streaming=True)
+        last_exc = None
+        for ds_id in ("pubmed_qa", "qiaojin/pubmed-qa"):
+            try:
+                return _ds.load_dataset(ds_id, subset, split=split_name, streaming=True)
+            except Exception as e:
+                last_exc = e
+                continue
+        raise last_exc if last_exc else RuntimeError("Failed to load PubMedQA dataset.")
     try:
         ds = _load(split)
     except Exception:
