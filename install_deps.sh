@@ -57,6 +57,9 @@ else
 fi
 rm -f "${TMP_REQ}"
 
+echo "[install] Installing tf-keras for transformers TensorFlow compatibility..."
+pip install --no-cache-dir tf-keras
+
 echo "[install] Installing flash-attn 2.8.3 (required, pre-built wheel for torch 2.8.0)..."
 WHEEL_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl"
 pip install --no-cache-dir "${WHEEL_URL}"
