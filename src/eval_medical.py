@@ -316,6 +316,8 @@ def main() -> None:
     with open(args.output, "w", encoding="utf-8") as fp:
         json.dump(results, fp, indent=2)
     logger.info("Evaluation results written to %s.", args.output)
+    # Work around rare shutdown crashes from mixed backends by exiting without Python teardown.
+    os._exit(0)
 
 
 if __name__ == "__main__":
