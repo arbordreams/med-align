@@ -134,7 +134,7 @@ bash script/run_medical_pipeline_research.sh
 Key research defaults:
 - Byte budget: 5 GiB
 - Term mining: top-k=2000, min-frequency=3, TF-IDF enabled
-- FastText: epochs=30, minCount=1, lr=0.05, dim=300, threads=24
+- FastText: epochs=30, minCount=1, lr=0.05, dim=300, threads=12 (per worker, 2 workers = 24 threads total)
 - Alignment: pivot_count=2000
 - Tokenization: workers=24
 - Evaluation: perplexity and QA enabled (QA fail-soft if dataset/split missing)

@@ -65,7 +65,9 @@ PIVOT_COUNT="${PIVOT_COUNT:-2000}"
 FASTTEXT_EPOCHS="${FASTTEXT_EPOCHS:-30}"
 FASTTEXT_MINCOUNT="${FASTTEXT_MINCOUNT:-1}"
 FASTTEXT_LR="${FASTTEXT_LR:-0.05}"
-FASTTEXT_THREAD="${FASTTEXT_THREAD:-24}"
+# FastText threading: 2 workers × 12 threads = 24 threads total (matches 24 vCPUs)
+# Each worker trains one embedding (source or target) in parallel
+FASTTEXT_THREAD="${FASTTEXT_THREAD:-12}"
 
 # Evaluation defaults
 EVAL_DATASET="${EVAL_DATASET:-uiyunkim-hub/pubmed-abstract:train}"
