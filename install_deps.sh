@@ -53,65 +53,67 @@ echo "[install] Installing flash-attn (prebuilt wheels only, no source build)...
 # Try multiple community wheel sources - skip if not available (flash-attn is optional)
 # Use --only-binary to prevent building from source
 set +e
+FA_STATUS=1
 
-# Try 1: Official flash-attn wheels
-echo "[install] Trying official flash-attn wheels from flashattn.github.io..."
+# Try 1: Official flash-attn wheels for 2.5.x
+echo "[install] Trying official flash-attn wheels (2.5.x) from flashattn.github.io..."
 pip install --no-cache-dir --only-binary :all: \
   --extra-index-url https://flashattn.github.io/whl/cu128/torch2.8/ \
   --extra-index-url https://flashattn.github.io/whl/cu121/torch2.8/ \
-  "flash-attn==2.5.*" 2>&1 | grep -v "^$" || true
-FA_STATUS=$?
-
-# Try 2: Community wheels from mjun0812 using --find-links
-if [ $FA_STATUS -ne 0 ]; then
-  echo "[install] Trying community wheels from mjun0812/flash-attention-prebuild-wheels..."
-  pip install --no-cache-dir --only-binary :all: \
-    --find-links https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.0.0/ \
-    "flash-attn==2.5.*" 2>&1 | grep -v "^$" || true
-  FA_STATUS=$?
+  "flash-attn==2.5.*" > /tmp/flash_install.log 2>&1
+if [ $? -eq 0 ]; then
+  FA_STATUS=0
+  echo "[install] Successfully installed flash-attn 2.5.x from official repo"
 fi
 
-# Try 2b: Direct wheel URL from mjun0812 (if find-links fails)
+# Try 2: Try newer compatible versions (2.6.x, 2.7.x, 2.8.x) that work with torch 2.8
 if [ $FA_STATUS -ne 0 ]; then
-  echo "[install] Trying direct wheel download from mjun0812 releases..."
-  PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')")
-  # Try multiple possible wheel names
-  for wheel_name in \
-    "flash_attn-2.5.9+cu128torch2.8-cp${PYTHON_VERSION}-cp${PYTHON_VERSION}-linux_x86_64.whl" \
-    "flash_attn-2.5.8+cu128torch2.8-cp${PYTHON_VERSION}-cp${PYTHON_VERSION}-linux_x86_64.whl" \
-    "flash_attn-2.5.7+cu128torch2.8-cp${PYTHON_VERSION}-cp${PYTHON_VERSION}-linux_x86_64.whl"; do
-    WHEEL_URL="https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.0.0/${wheel_name}"
-    pip install --no-cache-dir --only-binary :all: "${WHEEL_URL}" 2>&1 | grep -v "^$" || true
-    if [ $? -eq 0 ]; then
-      FA_STATUS=0
-      echo "[install] Successfully installed from ${wheel_name}"
-      break
-    fi
-  done
-fi
-
-# Try 3: Try different version patterns (2.5.9, 2.5.8, 2.5.7, etc.)
-if [ $FA_STATUS -ne 0 ]; then
-  echo "[install] Trying alternative flash-attn versions from official repo..."
-  for version in "2.5.9" "2.5.8" "2.5.7" "2.5.6" "2.5.5"; do
+  echo "[install] Trying newer flash-attn versions compatible with torch 2.8..."
+  for version in "2.6.*" "2.7.*" "2.8.*"; do
     pip install --no-cache-dir --only-binary :all: \
       --extra-index-url https://flashattn.github.io/whl/cu128/torch2.8/ \
       --extra-index-url https://flashattn.github.io/whl/cu121/torch2.8/ \
-      "flash-attn==${version}" 2>&1 | grep -v "^$" || true
+      "flash-attn==${version}" > /tmp/flash_install.log 2>&1
     if [ $? -eq 0 ]; then
       FA_STATUS=0
-      echo "[install] Successfully installed flash-attn ${version}"
+      echo "[install] Successfully installed flash-attn ${version} from official repo"
       break
     fi
   done
 fi
 
-# Try 4: PyPI as last resort (usually doesn't have wheels but worth trying)
+# Try 3: Community wheels from mjun0812 - try different CUDA versions (cu124, cu126) as fallback
 if [ $FA_STATUS -ne 0 ]; then
-  echo "[install] Trying PyPI for prebuilt wheels..."
-  pip install --no-cache-dir --only-binary :all: "flash-attn==2.5.*" 2>&1 | grep -v "^$" || true
-  FA_STATUS=$?
+  echo "[install] Trying community wheels from mjun0812 (trying cu124/cu126 as fallback)..."
+  PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}{sys.version_info.minor}')")
+  for cuda_ver in "cu128" "cu126" "cu124"; do
+    for version in "2.5.9" "2.6.3" "2.7.4" "2.8.3"; do
+      wheel_name="flash_attn-${version}+${cuda_ver}torch2.8-cp${PYTHON_VERSION}-cp${PYTHON_VERSION}-linux_x86_64.whl"
+      WHEEL_URL="https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.0.0/${wheel_name}"
+      pip install --no-cache-dir --only-binary :all: "${WHEEL_URL}" > /tmp/flash_install.log 2>&1
+      if [ $? -eq 0 ]; then
+        FA_STATUS=0
+        echo "[install] Successfully installed ${wheel_name}"
+        break 2
+      fi
+    done
+  done
 fi
+
+# Try 4: Try without version constraint to see what's available
+if [ $FA_STATUS -ne 0 ]; then
+  echo "[install] Trying flash-attn without version constraint from official repo..."
+  pip install --no-cache-dir --only-binary :all: \
+    --extra-index-url https://flashattn.github.io/whl/cu128/torch2.8/ \
+    --extra-index-url https://flashattn.github.io/whl/cu121/torch2.8/ \
+    flash-attn > /tmp/flash_install.log 2>&1
+  if [ $? -eq 0 ]; then
+    FA_STATUS=0
+    echo "[install] Successfully installed flash-attn (latest available)"
+  fi
+fi
+
+rm -f /tmp/flash_install.log
 
 if [ $FA_STATUS -ne 0 ]; then
   echo "[install] WARNING: Prebuilt flash-attn wheels not available from any source."
