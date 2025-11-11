@@ -56,27 +56,61 @@ def evaluate_perplexity(
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    eos_id = tokenizer.eos_token_id or tokenizer.pad_token_id or 0
 
-    dtype = torch.bfloat16
-    model = None
-    try:
-        cfg = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
-        if hasattr(cfg, "attn_implementation"):
-            setattr(cfg, "attn_implementation", "flash_attention_2")
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            config=cfg,
-            torch_dtype=dtype,
-            trust_remote_code=True,
-        )
-    except Exception:
-        # Fallback if config tweak is not supported
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            torch_dtype=dtype,
-            trust_remote_code=True,
-        )
-    model.to("cuda").eval()
+    # Load model with robustness and validate with a dummy forward pass to catch device-side asserts early.
+    def _load_and_smoke_test(torch_dtype: torch.dtype, use_flash: bool) -> AutoModelForCausalLM | None:
+        try:
+            cfg = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+            if use_flash and hasattr(cfg, "attn_implementation"):
+                setattr(cfg, "attn_implementation", "flash_attention_2")
+            model_local = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                config=cfg if use_flash else None,
+                torch_dtype=torch_dtype,
+                trust_remote_code=True,
+            )
+        except Exception:
+            try:
+                model_local = AutoModelForCausalLM.from_pretrained(
+                    model_path,
+                    torch_dtype=torch_dtype,
+                    trust_remote_code=True,
+                )
+            except Exception:
+                return None
+        try:
+            model_local.to("cuda").eval()
+            # Dummy forward to detect device-side asserts early
+            with torch.inference_mode(), torch.autocast("cuda", dtype=torch_dtype if torch_dtype != torch.float32 else torch.float32):
+                test_ids = tokenizer("hello world", return_tensors="pt", truncation=True, max_length=16)["input_ids"]
+                # Map any OOB ids to eos as safety
+                embed_size = model_local.get_input_embeddings().num_embeddings
+                oob_mask = (test_ids < 0) | (test_ids >= embed_size)
+                if oob_mask.any():
+                    test_ids = test_ids.masked_fill(oob_mask, eos_id)
+                test_ids = test_ids.to("cuda", non_blocking=True)
+                _ = model_local(test_ids, labels=test_ids)
+            return model_local
+        except Exception:
+            try:
+                del model_local  # type: ignore[unreachable]
+            except Exception:
+                pass
+            torch.cuda.empty_cache()
+            return None
+
+    # Try progressively less aggressive configs: bf16+flash_attn2 -> fp16 no-flash -> fp32 no-flash
+    model = (
+        _load_and_smoke_test(torch.bfloat16, use_flash=True)
+        or _load_and_smoke_test(torch.float16, use_flash=False)
+        or _load_and_smoke_test(torch.float32, use_flash=False)
+    )
+    if model is None:
+        raise RuntimeError("Failed to load model on CUDA for evaluation after multiple fallbacks.")
+    # Pick the active dtype from parameters (first param tensor dtype)
+    first_param = next(model.parameters())
+    active_dtype = first_param.dtype
 
     # Use streaming to avoid downloading entire large datasets. Fall back if split is missing.
     def _try_load(name: str, sp: str):
@@ -110,8 +144,12 @@ def evaluate_perplexity(
     current_bs = batch_size if batch_size and batch_size > 0 else 64
     last_oom_error = None  # store last CUDA OOM to re-raise with context when needed
 
+    # Safety: ensure token ids are within embedding size; warn once
+    embed_size = model.get_input_embeddings().num_embeddings
+    oob_warned = False
+
     def _process_batch(texts: List[str]) -> bool:
-        nonlocal losses, count, current_bs, last_oom_error
+        nonlocal losses, count, current_bs, last_oom_error, oob_warned
         if not texts:
             return True
         enc = tokenizer(
@@ -121,9 +159,23 @@ def evaluate_perplexity(
             truncation=True,
             max_length=max_length,
         )
+        # OOB id guard: map any ids outside embedding range to eos_id
+        ids = enc["input_ids"]
+        oob_mask = (ids < 0) | (ids >= embed_size)
+        if oob_mask.any():
+            if not oob_warned:
+                logger.warning(
+                    "Detected %d out-of-bound token ids; mapping to eos_id=%s. "
+                    "Check tokenizer/model vocab alignment.",
+                    int(oob_mask.sum().item()),
+                    str(eos_id),
+                )
+                oob_warned = True
+            ids = ids.masked_fill(oob_mask, eos_id)
+            enc["input_ids"] = ids
         enc = {k: v.to("cuda", non_blocking=True) for k, v in enc.items()}
         try:
-            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+            with torch.inference_mode(), torch.autocast("cuda", dtype=active_dtype if active_dtype != torch.float32 else torch.float32):
                 out = model(**enc, labels=enc["input_ids"])
                 losses.append(float(out.loss.detach().cpu()))
             count += len(texts)
