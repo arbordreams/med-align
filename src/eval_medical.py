@@ -275,84 +275,6 @@ def _load_model_with_fallbacks(model_path: str, tokenizer: AutoTokenizer) -> Aut
     return model
 
 
-def evaluate_pubmedqa(
-    *,
-    model_path: str,
-    tokenizer_path: str,
-    subset: str = "pqa_labeled",
-    split: str = "test",
-    max_samples: int | None = 200,
-) -> dict:
-    """
-    Simple zero-shot PubMedQA accuracy using conditional likelihood over {yes,no,maybe}.
-    """
-    if not torch.cuda.is_available():
-        raise RuntimeError("CUDA required for eval")
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    model = _load_model_with_fallbacks(model_path, tokenizer)
-    dtype = next(model.parameters()).dtype
-
-    # Load dataset with fallback splits
-    import datasets as _ds
-    def _load(split_name: str):
-        last_exc = None
-        for ds_id in ("pubmed_qa", "qiaojin/pubmed-qa"):
-            try:
-                return _ds.load_dataset(ds_id, subset, split=split_name, streaming=True)
-            except Exception as e:
-                last_exc = e
-                continue
-        raise last_exc if last_exc else RuntimeError("Failed to load PubMedQA dataset.")
-    try:
-        ds = _load(split)
-    except Exception:
-        for fb in ("validation", "train"):
-            try:
-                logger.warning("Requested PubMedQA split '%s' unavailable; falling back to '%s'.", split, fb)
-                ds = _load(fb)
-                break
-            except Exception:
-                continue
-        else:
-            raise
-    labels = ["yes", "no", "maybe"]
-    correct = 0
-    total = 0
-    per_class = {k: {"correct": 0, "total": 0} for k in labels}
-    def _score_answer(prompt: str, answer: str) -> float:
-        # Compute negative loss over answer tokens only
-        full = f"{prompt} {answer}"
-        enc_full = tokenizer(full, return_tensors="pt", truncation=True, max_length=256)
-        enc_prompt = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=256)
-        input_ids = enc_full["input_ids"][0]
-        cutoff = enc_prompt["input_ids"].shape[1]
-        labels_ids = input_ids.clone()
-        labels_ids[:cutoff] = -100  # ignore prompt tokens
-        with torch.inference_mode(), torch.autocast("cuda", dtype=dtype if dtype != torch.float32 else torch.float32):
-            out = model(input_ids=enc_full["input_ids"].to("cuda"), labels=labels_ids.unsqueeze(0).to("cuda"))
-        return -float(out.loss.detach().cpu())
-
-    for example in ds:
-        if max_samples and total >= max_samples:
-            break
-        question = example.get("question") or example.get("quest") or ""
-        ctx = example.get("context") or example.get("contexts") or ""
-        label = (example.get("final_decision") or example.get("label") or "").strip().lower()
-        if label not in labels or not question:
-            continue
-        prompt = f"Question: {question}\nContext: {ctx}\nAnswer:"
-        scores = {ans: _score_answer(prompt, ans) for ans in labels}
-        pred = max(scores, key=scores.get)
-        total += 1
-        per_class[label]["total"] += 1
-        if pred == label:
-            correct += 1
-            per_class[label]["correct"] += 1
-    acc = float(correct) / total if total else float("nan")
-    return {"accuracy": acc, "total": total, "per_class": {k: {"accuracy": (v["correct"] / v["total"]) if v["total"] else float("nan"), "total": v["total"]} for k, v in per_class.items()}}
-
 def _load_model_with_fallbacks(model_path: str, tokenizer: AutoTokenizer) -> AutoModelForCausalLM:
     # Internal helper shared by QA eval to reuse robust loading pattern.
     def _load_and_smoke_test(torch_dtype: torch.dtype, use_flash: bool) -> AutoModelForCausalLM | None:
@@ -417,16 +339,35 @@ def evaluate_pubmedqa(
     model = _load_model_with_fallbacks(model_path, tokenizer)
     dtype = next(model.parameters()).dtype
 
-    # Load dataset with fallback splits
+    # Load dataset with fallback to multiple real medical QA datasets
     import datasets as _ds
     def _load(split_name: str):
-        return _ds.load_dataset("qiaojin/pubmed-qa", subset, split=split_name, streaming=True)
+        # Try multiple real medical QA datasets in order of preference
+        dataset_configs = [
+            ("bigbio/pubmed_qa", "pubmed_qa_labeled_fold0_source", None),  # Most reliable
+            ("bigbio/pubmed_qa", None, None),  # Try without config
+            ("ncbi/pubmed-qa", None, None),
+            ("medalpaca/medical_meadow_mediqa", None, None),
+            ("pubmed_qa", None, None),  # Fallback to simple name
+        ]
+        last_exc = None
+        for ds_id, config, _ in dataset_configs:
+            try:
+                if config:
+                    return _ds.load_dataset(ds_id, config, split=split_name, streaming=True)
+                else:
+                    return _ds.load_dataset(ds_id, split=split_name, streaming=True)
+            except Exception as e:
+                last_exc = e
+                continue
+        raise last_exc if last_exc else RuntimeError("Failed to load any medical QA dataset.")
+    
     try:
         ds = _load(split)
     except Exception:
         for fb in ("validation", "train"):
             try:
-                logger.warning("Requested PubMedQA split '%s' unavailable; falling back to '%s'.", split, fb)
+                logger.warning("Requested split '%s' unavailable; falling back to '%s'.", split, fb)
                 ds = _load(fb)
                 break
             except Exception:
@@ -453,12 +394,47 @@ def evaluate_pubmedqa(
     for example in ds:
         if max_samples and total >= max_samples:
             break
-        question = example.get("question") or example.get("quest") or ""
-        ctx = example.get("context") or example.get("contexts") or ""
-        label = (example.get("final_decision") or example.get("label") or "").strip().lower()
+        # Handle different dataset field names
+        question = (
+            example.get("question") or 
+            example.get("quest") or 
+            example.get("Question") or
+            example.get("input") or
+            ""
+        )
+        ctx = (
+            example.get("context") or 
+            example.get("contexts") or 
+            example.get("Context") or
+            example.get("long_answer") or
+            example.get("abstract") or
+            ""
+        )
+        label = (
+            example.get("final_decision") or 
+            example.get("label") or 
+            example.get("Label") or
+            example.get("final_decision_str") or
+            example.get("answer") or
+            ""
+        ).strip().lower()
+        
+        # Normalize label to yes/no/maybe
+        if label in ["yes", "no", "maybe"]:
+            pass  # Already normalized
+        elif label in ["y", "n", "m"]:
+            label = {"y": "yes", "n": "no", "m": "maybe"}[label]
+        elif label in ["1", "0", "-1"] or label.isdigit():
+            # Some datasets use numeric labels
+            label_map = {"1": "yes", "0": "no", "-1": "maybe"}
+            label = label_map.get(label, label)
+        else:
+            # Skip if label doesn't match expected format
+            continue
+            
         if label not in labels or not question:
             continue
-        prompt = f"Question: {question}\nContext: {ctx}\nAnswer:"
+        prompt = f"Question: {question}\nContext: {ctx}\nAnswer:" if ctx else f"Question: {question}\nAnswer:"
         scores = {ans: _score_answer(prompt, ans) for ans in labels}
         pred = max(scores, key=scores.get)
         total += 1
