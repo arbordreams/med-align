@@ -35,3 +35,4 @@ logs/
 *.bak
 *.cache
 
+runs/tokenizer_adapt/*/alignment/target_vec.fasttext.bin
