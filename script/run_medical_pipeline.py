@@ -295,16 +295,20 @@ def main() -> None:
             if args.qa or os.getenv("MEDICAL_EVAL_QA", "") == "1":
                 qa_out = run_dir / "eval" / "pubmedqa.json"
                 os.makedirs(qa_out.parent, exist_ok=True)
-                qa_res = eval_medical.evaluate_pubmedqa(
-                    model_path=stage_outputs["apply"]["model_dir"],
-                    tokenizer_path=eval_tokenizer,
-                    subset=os.getenv("TOKALIGN_PUBMEDQA_SUBSET", "pqa_labeled"),
-                    split=os.getenv("TOKALIGN_PUBMEDQA_SPLIT", "test"),
-                    max_samples=int(os.getenv("TOKALIGN_PUBMEDQA_MAX", "200")),
-                )
-                with open(qa_out, "w", encoding="utf-8") as fp:
-                    json.dump(qa_res, fp, indent=2)
-                results["pubmedqa"] = {"results_path": str(qa_out), **qa_res}
+                try:
+                    qa_res = eval_medical.evaluate_pubmedqa(
+                        model_path=stage_outputs["apply"]["model_dir"],
+                        tokenizer_path=eval_tokenizer,
+                        subset=os.getenv("TOKALIGN_PUBMEDQA_SUBSET", "pqa_labeled"),
+                        split=os.getenv("TOKALIGN_PUBMEDQA_SPLIT", "test"),
+                        max_samples=int(os.getenv("TOKALIGN_PUBMEDQA_MAX", "200")),
+                    )
+                    with open(qa_out, "w", encoding="utf-8") as fp:
+                        json.dump(qa_res, fp, indent=2)
+                    results["pubmedqa"] = {"results_path": str(qa_out), **qa_res}
+                except Exception as qa_exc:  # pragma: no cover
+                    LOGGER.warning("PubMedQA evaluation skipped/failed: %s", qa_exc)
+                    results["pubmedqa"] = {"status": "error", "message": str(qa_exc)}
             with open(eval_output, "w", encoding="utf-8") as fp:
                 json.dump(results, fp, indent=2)
             return {
