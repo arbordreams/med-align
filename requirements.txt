@@ -4,6 +4,7 @@
 # Note: torchvision 0.24.0 requires torch 2.9.0, so we allow >=2.8.0 for flexibility
 
 torch>=2.8.0
+torchvision>=0.22.0
 transformers>=4.57.1
 datasets>=4.4.0
 hf-transfer>=0.1.9
