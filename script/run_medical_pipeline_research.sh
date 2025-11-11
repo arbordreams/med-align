@@ -68,6 +68,8 @@ FASTTEXT_LR="${FASTTEXT_LR:-0.05}"
 # FastText threading: 2 workers × 12 threads = 24 threads total (matches 24 vCPUs)
 # Each worker trains one embedding (source or target) in parallel
 FASTTEXT_THREAD="${FASTTEXT_THREAD:-12}"
+# Similarity threshold (used by alignment step)
+SIMILARITY_THRESHOLD="${SIMILARITY_THRESHOLD:-0.3}"
 
 # Evaluation defaults
 EVAL_DATASET="${EVAL_DATASET:-uiyunkim-hub/pubmed-abstract:train}"

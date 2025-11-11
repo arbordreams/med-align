@@ -99,6 +99,12 @@ if __name__ == '__main__':
     parser.add_argument("-v", "--vanilla-representation", action='store_true')
     parser.add_argument("-n", "--pivotal-token-number", type=int, default=300)
     parser.add_argument("-o", "--output-path", type=str, default="./data/pythia2gemma/glove.json")
+    parser.add_argument(
+        "--similarity-threshold",
+        type=float,
+        default=0.3,
+        help="Minimum similarity score to accept alignment (0.0-1.0). Lower scores use fallback.",
+    )
 
     args = parser.parse_args()
 
@@ -146,16 +152,40 @@ if __name__ == '__main__':
             td[tid] = t2l_supl[tid]
             supl_id += 1
             continue
-
-        # missing token id: random pick
+        # missing token id: smarter fallback
         if tid not in ids1:
-            td[tid] = random.randint(0, g_vocab_len2-1)
-            supl_id += 1
+            unk_candidates = ['<unk>', '<UNK>', 'unk', 'UNK']
+            found_unk = False
+            for unk_token in unk_candidates:
+                if unk_token in ids2:
+                    td[tid] = int(ids2[ids2.index(unk_token)])
+                    found_unk = True
+                    supl_id += 1
+                    break
+            if not found_unk:
+                td[tid] = 0
+                supl_id += 1
             continue
 
         id1_idx = ids1.index(tid)
         lix = np.argmax(sim[id1_idx])
+        sim_score = float(sim[id1_idx][lix])
         lid = ids2[lix]
+
+        # Similarity threshold check: use fallback on low confidence
+        if sim_score < args.similarity_threshold:
+            unk_candidates = ['<unk>', '<UNK>', 'unk', 'UNK']
+            found_unk = False
+            for unk_token in unk_candidates:
+                if unk_token in ids2:
+                    td[tid] = int(ids2[ids2.index(unk_token)])
+                    found_unk = True
+                    supl_id += 1
+                    break
+            if not found_unk:
+                td[tid] = 0
+                supl_id += 1
+            continue
 
         # assert(lid != 'unk'), tid
         # back to the second top id

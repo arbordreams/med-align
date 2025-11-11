@@ -219,6 +219,7 @@ def train_embeddings_and_align(
     fasttext_lr: float = 0.05,
     thread: int = 8,
     gold_mapping_path: Optional[str] = None,
+    similarity_threshold: float = 0.3,
 ) -> Dict[str, str]:
     align_dir = run_dir / "alignment"
     align_dir.mkdir(parents=True, exist_ok=True)
@@ -349,6 +350,8 @@ def train_embeddings_and_align(
         "-r",
         "-n",
         str(pivot_count),
+        "--similarity-threshold",
+        str(similarity_threshold),
     ]
     _run_subprocess(cmd)
 
@@ -482,6 +485,12 @@ def parse_args() -> argparse.Namespace:
     train_parser.add_argument("--fasttext-lr", type=float, default=0.05, help="FastText learning rate.")
     train_parser.add_argument("--fasttext-thread", type=int, default=8, help="FastText CPU threads.")
     train_parser.add_argument("--gold-mapping", help="Optional pre-computed target->source mapping.")
+    train_parser.add_argument(
+        "--similarity-threshold",
+        type=float,
+        default=0.3,
+        help="Minimum similarity score for alignment acceptance.",
+    )
 
     apply_parser = subparsers.add_parser("apply", help="Apply alignment to initialise model weights.")
     apply_parser.add_argument("--run-dir", required=True, help="Run directory.")
@@ -544,6 +553,7 @@ def main() -> None:
             fasttext_lr=args.fasttext_lr,
             thread=args.fasttext_thread,
             gold_mapping_path=args.gold_mapping,
+            similarity_threshold=args.similarity_threshold,
         )
         print(json.dumps(outputs, indent=2))
     elif args.command == "apply":

@@ -125,6 +125,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fasttext-mincount", type=int, default=5, help="FastText minimum frequency threshold.")
     parser.add_argument("--fasttext-lr", type=float, default=0.05, help="FastText learning rate.")
     parser.add_argument("--fasttext-thread", type=int, default=8, help="FastText CPU threads (embedding training).")
+    parser.add_argument(
+        "--similarity-threshold",
+        type=float,
+        default=0.3,
+        help="Minimum similarity score to accept alignment (0.0-1.0). Lower scores use fallback.",
+    )
     parser.add_argument("--max-retries", type=int, default=1, help="Retries per stage.")
     parser.add_argument("--retry-backoff", type=float, default=5.0, help="Initial backoff (seconds).")
     parser.add_argument("--evaluate", action="store_true", help="Run evaluation stage when set.")
@@ -166,7 +172,9 @@ def main() -> None:
         args.fasttext_epochs = max(args.fasttext_epochs, 30)
         args.fasttext_mincount = 1
         args.fasttext_lr = args.fasttext_lr if args.fasttext_lr > 0 else 0.05
-        args.fasttext_thread = max(args.fasttext_thread, 24)
+        # For 24 vCPUs with 2 workers: 12 threads per worker = 24 total
+        # Do not force 24; keep user/research-script setting when provided
+        args.fasttext_thread = max(args.fasttext_thread, 12)
 
     source_model_fallback = args.source_model_fallback or args.source_model
     target_model_fallback = args.target_model_fallback or args.target_tokenizer
@@ -273,6 +281,7 @@ def main() -> None:
             fasttext_mincount=args.fasttext_mincount,
             fasttext_lr=args.fasttext_lr,
             thread=args.fasttext_thread,
+            similarity_threshold=args.similarity_threshold,
         ),
     )
 
