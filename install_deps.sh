@@ -52,46 +52,14 @@ else
 fi
 rm -f "${TMP_REQ}"
 
-echo "[install] Installing flash-attn (required)..."
-# Check torch version to determine which wheel to use
-TORCH_VERSION=$(python -c "import torch; print(torch.__version__)" 2>/dev/null | cut -d'+' -f1)
-echo "[install] Detected PyTorch version: ${TORCH_VERSION}"
-
-# For torch 2.9.0, try torch 2.8 wheel (closest available)
-if [[ "${TORCH_VERSION}" == "2.9.0" ]]; then
-  echo "[install] Installing flash-attn 2.8.3 wheel (built for torch 2.8, testing compatibility with torch 2.9)..."
-  WHEEL_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl"
-  pip install --no-cache-dir "${WHEEL_URL}"
-  FA_STATUS=$?
-  
-  # Verify import works (torch 2.8 wheel may have symbol mismatch with torch 2.9)
-  if [ $FA_STATUS -eq 0 ]; then
-    echo "[install] Verifying flash-attn import..."
-    python -c "import flash_attn" 2>&1
-    if [ $? -ne 0 ]; then
-      echo "[install] ERROR: flash-attn installed but import failed due to PyTorch version incompatibility."
-      echo "[install] The torch 2.8 wheel is not compatible with torch 2.9.0."
-      echo "[install] No pre-built wheel available for torch 2.9.0. Options:"
-      echo "[install]   1. Use torch 2.8.0 instead of 2.9.0"
-      echo "[install]   2. Wait for official flash-attn wheel for torch 2.9.0"
-      echo "[install]   3. Check for community wheels at: https://github.com/Dao-AILab/flash-attention/releases"
-      exit 1
-    fi
-  fi
-else
-  # For other torch versions, use appropriate wheel
-  echo "[install] Installing flash-attn 2.8.3 from official wheels..."
-  WHEEL_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl"
-  pip install --no-cache-dir "${WHEEL_URL}"
-  FA_STATUS=$?
-fi
-
-if [ $FA_STATUS -ne 0 ]; then
+echo "[install] Installing flash-attn 2.8.3 (required, pre-built wheel for torch 2.8.0)..."
+WHEEL_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl"
+pip install --no-cache-dir "${WHEEL_URL}"
+if [ $? -ne 0 ]; then
   echo "[install] ERROR: Failed to install flash-attn wheel."
   exit 1
-else
-  echo "[install] Successfully installed flash-attn"
 fi
+echo "[install] Successfully installed flash-attn"
 
 echo "[install] Verifying flash-attn import..."
 python - <<'PY'
