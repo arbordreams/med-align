@@ -24,6 +24,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
+echo "[quickstart] Updating repository (git pull)..."
+git pull --rebase --autostash origin main || true
+
 SRC_MODEL="${SRC_MODEL:-EleutherAI/pythia-1b}"
 SRC_TOK="${SRC_TOK:-EleutherAI/pythia-1b}"
 TGT_TOK="${TGT_TOK:-google/gemma-2b}"
