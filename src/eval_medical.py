@@ -20,7 +20,7 @@ from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 
 DEFAULT_DATASETS: List[str] = [
-    "uiyunkim-hub/pubmed-abstract:test",
+    "uiyunkim-hub/pubmed-abstract:train",
 ]
 
 logger = logging.getLogger(__name__)
@@ -78,8 +78,30 @@ def evaluate_perplexity(
         )
     model.to("cuda").eval()
 
-    # Use streaming to avoid downloading entire large datasets
-    ds = datasets.load_dataset(dataset_name, split=split, streaming=True)
+    # Use streaming to avoid downloading entire large datasets. Fall back if split is missing.
+    def _try_load(name: str, sp: str):
+        return datasets.load_dataset(name, split=sp, streaming=True)
+
+    ds = None
+    try:
+        ds = _try_load(dataset_name, split)
+    except Exception:
+        # Fallback order: validation -> train
+        for fallback_split in ("validation", "train"):
+            try:
+                logger.warning(
+                    "Requested split '%s' unavailable for %s; falling back to '%s'.",
+                    split,
+                    dataset_name,
+                    fallback_split,
+                )
+                ds = _try_load(dataset_name, fallback_split)
+                split = fallback_split
+                break
+            except Exception:
+                continue
+        if ds is None:
+            raise
 
     losses: List[float] = []
     count = 0

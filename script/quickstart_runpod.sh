@@ -30,7 +30,8 @@ TGT_TOK="${TGT_TOK:-google/gemma-2b}"
 RUN_ROOT="${RUN_ROOT:-runs/tokenizer_adapt}"
 BYTE_BUDGET="${BYTE_BUDGET:-5000000}"
 MAX_SAMPLES="${MAX_SAMPLES:-2000}"
-EVAL_DATASET="${EVAL_DATASET:-uiyunkim-hub/pubmed-abstract:test}"
+# Use train split by default; evaluation code will fall back if unavailable.
+EVAL_DATASET="${EVAL_DATASET:-uiyunkim-hub/pubmed-abstract:train}"
 MAX_EVAL="${MAX_EVAL:-50}"
 
 echo "[quickstart] Repository root: ${ROOT_DIR}"
