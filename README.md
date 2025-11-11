@@ -120,6 +120,34 @@ python script/run_medical_pipeline.py \
 Logs are written under `runs/logs/` and a roll-up summary can be found in
 `runs/tokenizer_adapt/<timestamp>/pipeline_summary.json`.
 
+### Modes: Smoke test vs Research
+
+- Smoke test (default quickstart): small corpus (~5MB), fast config for sanity checks.
+- Research mode (overnight, quality-first): 1GB corpus cap, more terms, more pivots, longer embedding training, tuned for H100.
+
+Run research-grade pipeline:
+
+```
+bash script/run_medical_pipeline_research.sh
+```
+
+Key research defaults:
+- Byte budget: 1 GiB
+- Term mining: top-k=2000, min-frequency=3, TF-IDF enabled
+- FastText: epochs=20, minCount=2, lr=0.05, dim=300, threads=24
+- Alignment: pivot_count=1000
+- Tokenization: workers=24
+- Evaluation: perplexity and QA enabled (QA fail-soft if dataset/split missing)
+
+Recommended env on H100:
+```
+export OMP_NUM_THREADS=24
+export MKL_NUM_THREADS=24
+export TOKENIZERS_PARALLELISM=true
+export NVIDIA_TF32_OVERRIDE=1
+export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256,expandable_segments:True
+```
+
 #### Curated medical corpus builder
 
 To avoid parsing mismatches, TokAlign ships with a dataset registry and builder

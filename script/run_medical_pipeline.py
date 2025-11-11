@@ -113,6 +113,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tokenizer-cache", help="Cache directory passed to Hugging Face dataset loader.")
     parser.add_argument("--evaluation-dataset", action="append", help="Optional HF dataset names for evaluation.")
     parser.add_argument("--max-eval-samples", type=int, default=128, help="Samples evaluated per dataset.")
+    # Research-mode and embedding training knobs
+    parser.add_argument("--research-mode", action="store_true", help="Enable quality-first research configuration.")
+    parser.add_argument("--fasttext-epochs", type=int, default=5, help="FastText training epochs.")
+    parser.add_argument("--fasttext-mincount", type=int, default=5, help="FastText minimum frequency threshold.")
+    parser.add_argument("--fasttext-lr", type=float, default=0.05, help="FastText learning rate.")
+    parser.add_argument("--fasttext-thread", type=int, default=8, help="FastText CPU threads (embedding training).")
     parser.add_argument("--max-retries", type=int, default=1, help="Retries per stage.")
     parser.add_argument("--retry-backoff", type=float, default=5.0, help="Initial backoff (seconds).")
     parser.add_argument("--evaluate", action="store_true", help="Run evaluation stage when set.")
@@ -133,6 +139,27 @@ def main() -> None:
     args = parse_args()
     run_dir = medical_pipeline.create_run_dir(Path(args.run_root), args.run_id)
     _setup_logging(run_dir)
+
+    # Apply research-grade overrides when requested. These favor quality over speed.
+    if args.research_mode:
+        LOGGER.info("Research mode enabled: applying quality-first defaults for a 1GB corpus.")
+        # Corpus scale
+        args.byte_budget = 1_073_741_824  # 1 GiB
+        # Term mining
+        args.term_top_k = 2000
+        args.min_term_frequency = 3
+        args.use_tfidf = True
+        # Tokenization throughput
+        args.tokenizer_workers = max(args.tokenizer_workers, 24)
+        # Alignment quality
+        args.pivot_count = max(args.pivot_count, 1000)
+        # Evaluation breadth
+        args.max_eval_samples = max(args.max_eval_samples, 1000)
+        # FastText training (embedding quality)
+        args.fasttext_epochs = max(args.fasttext_epochs, 20)
+        args.fasttext_mincount = min(args.fasttext_mincount, 2)
+        args.fasttext_lr = args.fasttext_lr if args.fasttext_lr > 0 else 0.05
+        args.fasttext_thread = max(args.fasttext_thread, 24)
 
     source_model_fallback = args.source_model_fallback or args.source_model
     target_model_fallback = args.target_model_fallback or args.target_tokenizer
@@ -235,6 +262,10 @@ def main() -> None:
             tokenizer_target=augmented_target,
             embedding_backend=args.embedding_backend,
             pivot_count=args.pivot_count,
+            fasttext_epochs=args.fasttext_epochs,
+            fasttext_mincount=args.fasttext_mincount,
+            fasttext_lr=args.fasttext_lr,
+            thread=args.fasttext_thread,
         ),
     )
 

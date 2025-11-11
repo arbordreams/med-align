@@ -213,6 +213,10 @@ def train_embeddings_and_align(
     tokenizer_target: str,
     embedding_backend: str,
     pivot_count: int,
+    fasttext_epochs: int = 5,
+    fasttext_mincount: int = 5,
+    fasttext_lr: float = 0.05,
+    thread: int = 8,
     gold_mapping_path: Optional[str] = None,
 ) -> Dict[str, str]:
     align_dir = run_dir / "alignment"
@@ -263,7 +267,10 @@ def train_embeddings_and_align(
                 input=corpus_path,
                 model="skipgram",
                 dim=300,
-                epoch=5,
+                epoch=fasttext_epochs,
+                minCount=fasttext_mincount,
+                lr=fasttext_lr,
+                thread=thread,
             )
             model.save_model(str(save_file.with_suffix(".bin")))
             words = model.get_words(include_freq=True)
@@ -440,6 +447,11 @@ def parse_args() -> argparse.Namespace:
         help="Embedding backend to train.",
     )
     train_parser.add_argument("--pivot-count", type=int, default=300, help="Number of pivot tokens.")
+    # Optional FastText quality/performance knobs
+    train_parser.add_argument("--fasttext-epochs", type=int, default=5, help="FastText training epochs.")
+    train_parser.add_argument("--fasttext-mincount", type=int, default=5, help="FastText minimum frequency.")
+    train_parser.add_argument("--fasttext-lr", type=float, default=0.05, help="FastText learning rate.")
+    train_parser.add_argument("--fasttext-thread", type=int, default=8, help="FastText CPU threads.")
     train_parser.add_argument("--gold-mapping", help="Optional pre-computed target->source mapping.")
 
     apply_parser = subparsers.add_parser("apply", help="Apply alignment to initialise model weights.")
@@ -498,6 +510,10 @@ def main() -> None:
             tokenizer_target=args.tokenizer_target,
             embedding_backend=args.embedding_backend,
             pivot_count=args.pivot_count,
+            fasttext_epochs=args.fasttext_epochs,
+            fasttext_mincount=args.fasttext_mincount,
+            fasttext_lr=args.fasttext_lr,
+            thread=args.fasttext_thread,
             gold_mapping_path=args.gold_mapping,
         )
         print(json.dumps(outputs, indent=2))
