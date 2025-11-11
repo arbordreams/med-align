@@ -112,6 +112,7 @@ python "${ROOT_DIR}/script/run_medical_pipeline.py" \
   --fasttext-mincount "${FASTTEXT_MINCOUNT}" \
   --fasttext-lr "${FASTTEXT_LR}" \
   --fasttext-thread "${FASTTEXT_THREAD}" \
+  --similarity-threshold "${SIMILARITY_THRESHOLD:-0.3}" \
   --evaluate \
   --qa
 
