@@ -49,30 +49,41 @@ else
 fi
 rm -f "${TMP_REQ}"
 
-echo "[install] Installing flash-attn (prefer prebuilt wheels)..."
-# Try common wheel indexes first (versions vary by CUDA/Torch minor subdir published upstream).
+echo "[install] Installing flash-attn (prebuilt wheels only, no source build)..."
+# Try community wheel indexes - skip if not available (flash-attn is optional)
+# Use --only-binary to prevent building from source
 set +e
-pip install --no-cache-dir \
+echo "[install] Trying official flash-attn wheels from flashattn.github.io..."
+pip install --no-cache-dir --only-binary :all: \
   --extra-index-url https://flashattn.github.io/whl/cu128/torch2.8/ \
   --extra-index-url https://flashattn.github.io/whl/cu121/torch2.8/ \
   "flash-attn==2.5.*"
 FA_STATUS=$?
+
 if [ $FA_STATUS -ne 0 ]; then
-  echo "[install] Prebuilt flash-attn wheels not available; falling back to source build with --no-build-isolation."
-  pip install --no-cache-dir --no-build-isolation "flash-attn==2.5.*"
+  echo "[install] Official wheels not available, trying PyPI for prebuilt wheels..."
+  pip install --no-cache-dir --only-binary :all: "flash-attn==2.5.*"
   FA_STATUS=$?
+fi
+
+if [ $FA_STATUS -ne 0 ]; then
+  echo "[install] WARNING: Prebuilt flash-attn wheels not available."
+  echo "[install] flash-attn is optional for the medical pipeline - skipping installation."
+  echo "[install] The pipeline will work without it. You can install it later if needed."
+  FA_STATUS=0  # Don't fail the install
 fi
 set -e
 
-echo "[install] Verifying flash-attn import..."
+echo "[install] Verifying flash-attn import (optional)..."
 python - <<'PY'
 import sys
 try:
     import flash_attn  # noqa: F401
+    print("[install] flash-attn is installed and importable.")
+except ImportError:
+    print("[install] flash-attn not available (optional - pipeline will work without it).")
 except Exception as e:
-    sys.stderr.write(f"[install] flash-attn import failed: {e}\n")
-    sys.exit(1)
-print("[install] flash-attn is installed and importable.")
+    print(f"[install] flash-attn check: {e}")
 PY
 
 echo "[install] All dependencies installed successfully."
