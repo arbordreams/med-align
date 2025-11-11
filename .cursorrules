@@ -1,5 +1,17 @@
 # Cursor Refactoring Prompt: BioMistral & Mistral Integration
 
+## WORKFLOW PREFERENCES
+
+**Git and Lambda Deployment:**
+- **NEVER automatically push to GitHub or update Lambda** unless explicitly requested
+- When the user requests "push to GitHub and Lambda" or similar commands:
+  1. Commit all changes with a descriptive message
+  2. Push to GitHub (`git push origin main`)
+  3. SSH to Lambda and pull the latest changes (`git pull origin main`)
+  4. Verify the update was successful
+- Always wait for explicit user command before deploying changes
+- Do not auto-commit or auto-push during code changes
+
 ## CRITICAL: Research Phase First
 
 Before making any code changes, you MUST thoroughly research both Hugging Face model pages:
@@ -215,11 +227,3 @@ Begin by:
 5. Then systematically updating the codebase following this guide
 ```
 
-This prompt instructs Cursor to:
-1. Research both Hugging Face model pages first
-2. Understand the models' architectures and requirements
-3. Systematically refactor all relevant files
-4. Ensure proper model loading, tokenization, and usage
-5. Test and verify the changes
-
-The prompt is structured to guide a thorough refactoring that maintains code quality and functionality while adding support for the new models.
