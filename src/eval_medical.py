@@ -275,51 +275,6 @@ def _load_model_with_fallbacks(model_path: str, tokenizer: AutoTokenizer) -> Aut
     return model
 
 
-def _load_model_with_fallbacks(model_path: str, tokenizer: AutoTokenizer) -> AutoModelForCausalLM:
-    # Internal helper shared by QA eval to reuse robust loading pattern.
-    def _load_and_smoke_test(torch_dtype: torch.dtype, use_flash: bool) -> AutoModelForCausalLM | None:
-        try:
-            cfg = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
-            if use_flash and hasattr(cfg, "attn_implementation"):
-                setattr(cfg, "attn_implementation", "flash_attention_2")
-            model_local = AutoModelForCausalLM.from_pretrained(
-                model_path,
-                config=cfg if use_flash else None,
-                torch_dtype=torch_dtype,
-                trust_remote_code=True,
-            )
-        except Exception:
-            try:
-                model_local = AutoModelForCausalLM.from_pretrained(
-                    model_path,
-                    torch_dtype=torch_dtype,
-                    trust_remote_code=True,
-                )
-            except Exception:
-                return None
-        try:
-            model_local.to("cuda").eval()
-            with torch.inference_mode(), torch.autocast("cuda", dtype=torch_dtype if torch_dtype != torch.float32 else torch.float32):
-                _ = model_local(**tokenizer("hello world", return_tensors="pt", truncation=True, max_length=8).to("cuda"))
-            return model_local
-        except Exception:
-            try:
-                del model_local  # type: ignore
-            except Exception:
-                pass
-            torch.cuda.empty_cache()
-            return None
-
-    model = (
-        _load_and_smoke_test(torch.bfloat16, use_flash=True)
-        or _load_and_smoke_test(torch.float16, use_flash=False)
-        or _load_and_smoke_test(torch.float32, use_flash=False)
-    )
-    if model is None:
-        raise RuntimeError("Failed to load model on CUDA for evaluation after multiple fallbacks.")
-    return model
-
-
 def evaluate_pubmedqa(
     *,
     model_path: str,
