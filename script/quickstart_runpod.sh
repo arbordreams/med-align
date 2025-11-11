@@ -71,7 +71,8 @@ python "${ROOT_DIR}/script/run_medical_pipeline.py" \
   --byte-budget "${BYTE_BUDGET}" \
   --evaluation-dataset "${EVAL_DATASET}" \
   --max-eval-samples "${MAX_EVAL}" \
-  --evaluate
+  --evaluate \
+  --qa
 
 echo "[quickstart] Completed. See runs directory under ${RUN_ROOT} for artifacts."
 

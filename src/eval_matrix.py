@@ -1,8 +1,15 @@
 import json
-from nltk.translate.bleu_score import sentence_bleu
+import argparse
+from typing import Dict, List, Tuple
+
+try:
+    import sacrebleu  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    sacrebleu = None  # type: ignore
+
+from nltk.translate.bleu_score import sentence_bleu  # fallback for BLEU-1
 from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer
-import argparse
 
 def read_tsv(file_path):
     res = []
@@ -45,6 +52,44 @@ def eval_trans_matrix(
     print(f"Average bleu: {total_b/len(eval_data)}")
 
     return total_b/len(eval_data)
+
+
+def compute_bleu(trans_dict_path: str, eval_file_path: str, ngram: int = 1) -> Dict[str, float]:
+    """
+    Compute corpus-level BLEU on the alignment matrix against a reference pairs TSV.
+    - trans_dict_path: JSON mapping target-token-id -> source-token-id (or vice versa)
+    - eval_file_path: TSV where each line is: "<src_ids_space_separated>\\t<tgt_ids_space_separated>"
+    - ngram: 1..4 to choose BLEU-N
+    Returns: {"bleu": float, "ngram": int, "samples": int}
+    """
+    with open(trans_dict_path, "r") as f:
+        trans = json.load(f)
+    eval_data = read_tsv(eval_file_path)
+    # references are source ids; predictions are mapped from target ids through trans
+    refs: List[str] = []
+    sys: List[str] = []
+    for s in eval_data:
+        src, tgt = s[0], s[1]
+        pred = [str(trans[tid]) for tid in tgt if tid in trans]
+        refs.append(" ".join(src))
+        sys.append(" ".join(pred))
+    if not refs or not sys:
+        return {"bleu": float("nan"), "ngram": ngram, "samples": 0}
+    if sacrebleu:
+        weights_map = {
+            1: (1.0, 0.0, 0.0, 0.0),
+            2: (0.5, 0.5, 0.0, 0.0),
+            3: (1.0 / 3, 1.0 / 3, 1.0 / 3, 0.0),
+            4: (0.25, 0.25, 0.25, 0.25),
+        }
+        weights = weights_map.get(ngram, weights_map[1])
+        score = sacrebleu.corpus_bleu(sys, [refs], force=True, eff_ref_len="shortest", use_effective_order=True, smooth_method="exp", smooth_value=0.0, lowercase=False, tokenize="none", weights=weights)  # type: ignore
+        return {"bleu": float(score.score), "ngram": ngram, "samples": len(sys)}
+    # Fallback to average sentence BLEU-1 if sacrebleu is not available
+    total = 0.0
+    for r, h in zip(refs, sys):
+        total += sentence_bleu([r.split()], h.split(), (1, 0, 0, 0))
+    return {"bleu": float(total / len(sys)), "ngram": 1, "samples": len(sys)}
 
 # BERT-Score
 def eval_bert_score(

@@ -116,6 +116,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-retries", type=int, default=1, help="Retries per stage.")
     parser.add_argument("--retry-backoff", type=float, default=5.0, help="Initial backoff (seconds).")
     parser.add_argument("--evaluate", action="store_true", help="Run evaluation stage when set.")
+    parser.add_argument("--qa", action="store_true", help="Run PubMedQA evaluation during the evaluation stage.")
     parser.add_argument(
         "--skip-eval",
         action="store_true",
@@ -237,6 +238,17 @@ def main() -> None:
         ),
     )
 
+    # Optional BLEU evaluation on alignment matrices if a reference pairs file is provided
+    try:
+        matrix_ref = os.getenv("TOKALIGN_MATRIX_EVAL_FILE")
+        medical_pipeline.evaluate_alignment_bleu(
+            run_dir=run_dir,
+            align_matrix=stage_outputs["train_align"]["align_matrix"],
+            eval_pairs_path=matrix_ref,
+            ngram=int(os.getenv("TOKALIGN_MATRIX_BLEU_N", "1")),
+        )
+    except Exception as _bleu_exc:  # pragma: no cover - do not fail pipeline
+        LOGGER.warning("Matrix BLEU evaluation skipped/failed: %s", _bleu_exc)
     stage_outputs["apply"] = _retry(
         "apply_alignment",
         args.max_retries,
@@ -279,6 +291,20 @@ def main() -> None:
                         max_length=eval_maxlen,
                     )
                 }
+            # Optional PubMedQA
+            if args.qa or os.getenv("MEDICAL_EVAL_QA", "") == "1":
+                qa_out = run_dir / "eval" / "pubmedqa.json"
+                os.makedirs(qa_out.parent, exist_ok=True)
+                qa_res = eval_medical.evaluate_pubmedqa(
+                    model_path=stage_outputs["apply"]["model_dir"],
+                    tokenizer_path=eval_tokenizer,
+                    subset=os.getenv("TOKALIGN_PUBMEDQA_SUBSET", "pqa_labeled"),
+                    split=os.getenv("TOKALIGN_PUBMEDQA_SPLIT", "test"),
+                    max_samples=int(os.getenv("TOKALIGN_PUBMEDQA_MAX", "200")),
+                )
+                with open(qa_out, "w", encoding="utf-8") as fp:
+                    json.dump(qa_res, fp, indent=2)
+                results["pubmedqa"] = {"results_path": str(qa_out), **qa_res}
             with open(eval_output, "w", encoding="utf-8") as fp:
                 json.dump(results, fp, indent=2)
             return {

@@ -24,3 +24,4 @@ sentencepiece>=0.2.1
 pyarrow>=20.0.0
 flash-attn==2.8.3
 tf-keras
+sacrebleu>=2.4.2

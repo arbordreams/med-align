@@ -363,6 +363,37 @@ def apply_alignment(
     return str(output_dir)
 
 
+def evaluate_alignment_bleu(
+    *,
+    run_dir: Path,
+    align_matrix: str,
+    eval_pairs_path: Optional[str],
+    ngram: int = 1,
+) -> Optional[str]:
+    """
+    Evaluate alignment quality with BLEU-N on token-pair references if provided.
+    Writes results to runs/<run>/metrics/matrix_bleu.json and returns the path.
+    If eval_pairs_path is None or missing, logs and returns None.
+    """
+    metrics_dir = run_dir / "metrics"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    if not eval_pairs_path or not Path(eval_pairs_path).exists():
+        logger.warning("No alignment reference pairs provided; skipping BLEU evaluation.")
+        return None
+    try:
+        from . import eval_matrix  # type: ignore
+    except Exception:
+        import sys as _sys
+        _sys.path.append(str(SCRIPT_ROOT / "src"))
+        import eval_matrix  # type: ignore
+    result = eval_matrix.compute_bleu(align_matrix, eval_pairs_path, ngram=ngram)
+    out_path = metrics_dir / "matrix_bleu.json"
+    with open(out_path, "w", encoding="utf-8") as fp:
+        json.dump(result, fp, indent=2)
+    logger.info("Matrix BLEU written to %s: %s", out_path, result)
+    return str(out_path)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="TokAlign medical pipeline helper.")
     subparsers = parser.add_subparsers(dest="command", required=True)
