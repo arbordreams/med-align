@@ -43,8 +43,13 @@ pip install --user --force-reinstall --no-cache-dir torch==2.8.0 torchvision==0.
 
 echo "[install] Installing remaining Python dependencies (excluding torch/flash-attn)..."
 # Filter out torch and flash-attn from bulk install to avoid build/ABI issues
+# Also ensure numpy is pinned to <2.0 for TensorFlow compatibility
 TMP_REQ="/tmp/requirements_no_torch_flash.txt"
 grep -Ev '^(torch|flash-attn)[[:space:]]*([=<>!]|$)' requirements.txt > "${TMP_REQ}" || true
+# Force numpy <2.0 if not already specified (for TensorFlow compatibility)
+if ! grep -q "numpy<2" "${TMP_REQ}" 2>/dev/null; then
+  echo "numpy<2.0,>=1.24.0" >> "${TMP_REQ}"
+fi
 if [ -s "${TMP_REQ}" ]; then
   pip install --no-cache-dir -r "${TMP_REQ}"
 else
