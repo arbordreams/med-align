@@ -52,36 +52,52 @@ else
 fi
 rm -f "${TMP_REQ}"
 
-echo "[install] Installing flash-attn (prebuilt wheel only, no source build)..."
-# Install from direct wheel URL - skip if not available (flash-attn is optional)
+echo "[install] Installing flash-attn (required)..."
+# Try wheel first, then build from source if needed
 set +e
 WHEEL_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl"
-echo "[install] Installing flash-attn 2.8.3 from Dao-AILab releases..."
+echo "[install] Attempting to install flash-attn 2.8.3 from prebuilt wheel..."
 pip install --no-cache-dir "${WHEEL_URL}"
 FA_STATUS=$?
 
 if [ $FA_STATUS -ne 0 ]; then
-  echo "[install] WARNING: Could not install flash-attn from wheel URL."
-  echo "[install] flash-attn is optional for the medical pipeline - skipping installation."
-  echo "[install] The pipeline will work without it. You can install it later if needed."
-  FA_STATUS=0  # Don't fail the install
+  echo "[install] Wheel installation failed. Building flash-attn from source..."
+  # Check if build dependencies are available
+  if ! command -v ninja &> /dev/null; then
+    echo "[install] Installing ninja (required for flash-attn build)..."
+    pip install ninja
+  fi
+  
+  # Clone and build flash-attn from source
+  TMP_DIR=$(mktemp -d)
+  cd "${TMP_DIR}"
+  echo "[install] Cloning flash-attention repository..."
+  git clone --depth 1 --branch v2.8.3 https://github.com/Dao-AILab/flash-attention.git
+  cd flash-attention
+  echo "[install] Building flash-attn from source (this may take several minutes)..."
+  pip install --no-cache-dir .
+  FA_STATUS=$?
+  cd - > /dev/null
+  rm -rf "${TMP_DIR}"
+fi
+
+if [ $FA_STATUS -ne 0 ]; then
+  echo "[install] ERROR: Failed to install flash-attn. This is required for the pipeline."
+  exit 1
 else
-  echo "[install] Successfully installed flash-attn 2.8.3"
+  echo "[install] Successfully installed flash-attn"
 fi
 set -e
 
-echo "[install] Verifying flash-attn import (optional)..."
+echo "[install] Verifying flash-attn import..."
 python - <<'PY'
 import sys
 try:
     import flash_attn  # noqa: F401
-    print("[install] flash-attn is installed and importable.")
-except (ImportError, RuntimeError, OSError) as e:
-    # ImportError: not installed, RuntimeError/OSError: symbol mismatch (torch version incompatibility)
-    print(f"[install] flash-attn not available (optional - pipeline will work without it).")
-    print(f"[install] Note: {type(e).__name__}: {str(e)[:100]}")
+    print("[install] ✓ flash-attn is installed and importable.")
 except Exception as e:
-    print(f"[install] flash-attn check: {e}")
+    print(f"[install] ERROR: flash-attn import failed: {e}")
+    sys.exit(1)
 PY
 
 echo "[install] All dependencies installed successfully."
