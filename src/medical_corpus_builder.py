@@ -12,7 +12,7 @@ import hashlib
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -272,7 +272,7 @@ def main() -> None:
         )
 
     manifest = {
-        "generated_at": datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "output_dir": str(output_dir),
         "datasets": shard_entries,
         "aggregate": aggregate_entry,

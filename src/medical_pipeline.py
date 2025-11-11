@@ -22,7 +22,7 @@ import logging
 import os
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
@@ -43,7 +43,7 @@ DEFAULT_RUN_ROOT = SCRIPT_ROOT / "runs" / "tokenizer_adapt"
 
 
 def timestamp() -> str:
-    return datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
 
 def create_run_dir(run_root: Path = DEFAULT_RUN_ROOT, run_id: Optional[str] = None) -> Path:
