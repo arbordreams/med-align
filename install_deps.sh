@@ -35,11 +35,11 @@ fi
 echo "[install] Upgrading pip, setuptools, wheel..."
 pip install --upgrade pip setuptools wheel
 
-echo "[install] Installing torch and compatible torchvision (CUDA 12.8 wheels)..."
-# Install torch and torchvision together to ensure compatibility
+echo "[install] Installing torch==2.8.0 and compatible torchvision (CUDA 12.8 wheels)..."
+# Install torch 2.8.0 (has official flash-attn wheels) with compatible torchvision
 # Use --user to override incompatible system torchvision (0.22.0 from apt)
-# Note: torchvision 0.24.0 requires torch 2.9.0, so we install compatible versions
-pip install --user --force-reinstall --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu128
+# torchvision 0.23.0 is compatible with torch 2.8.0
+pip install --user --force-reinstall --no-cache-dir torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu128
 
 echo "[install] Installing remaining Python dependencies (excluding torch/flash-attn)..."
 # Filter out torch and flash-attn from bulk install to avoid build/ABI issues
