@@ -24,7 +24,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
 try:
     from . import medical_corpus  # type: ignore
@@ -32,6 +32,9 @@ try:
 except ImportError:  # pragma: no cover
     import medical_corpus  # type: ignore
     import medical_terms  # type: ignore
+
+if TYPE_CHECKING:  # pragma: no cover
+    import fasttext as fasttext_module  # type: ignore[import]  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -238,7 +241,13 @@ def train_embeddings_and_align(
             _run_subprocess(cmd, cwd=glove_dir)
     else:
         # Train FastText embeddings using python binding.
-        import fasttext
+        try:
+            import fasttext  # type: ignore[import]
+        except ImportError as exc:
+            raise RuntimeError(
+                "FastText backend selected but the `fasttext` module is unavailable. "
+                "Install the prebuilt `fasttext-wheel>=0.9.2` package (pip install fasttext-wheel)."
+            ) from exc
 
         for corpus_path, save_file in ((source_glove_path, vec_source), (target_glove_path, vec_target)):
             logger.info("Training FastText embeddings for %s.", corpus_path)
@@ -387,7 +396,7 @@ def parse_args() -> argparse.Namespace:
     train_parser.add_argument("--tokenizer-target", required=True, help="Target tokenizer path (augmented).")
     train_parser.add_argument(
         "--embedding-backend",
-        default="glove",
+        default="fasttext",
         choices=["glove", "fasttext"],
         help="Embedding backend to train.",
     )

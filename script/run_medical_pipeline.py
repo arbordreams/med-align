@@ -106,7 +106,7 @@ def parse_args() -> argparse.Namespace:
         "--embedding-backend",
         choices=["glove", "fasttext"],
         default="fasttext",
-        help="Embedding backend.",
+        help="Embedding backend (FastText relies on the prebuilt fasttext-wheel package).",
     )
     parser.add_argument("--pivot-count", type=int, default=300, help="Number of pivot tokens during alignment.")
     parser.add_argument("--tokenizer-workers", type=int, default=8, help="Number of preprocessing workers.")
@@ -116,6 +116,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-retries", type=int, default=1, help="Retries per stage.")
     parser.add_argument("--retry-backoff", type=float, default=5.0, help="Initial backoff (seconds).")
     parser.add_argument("--evaluate", action="store_true", help="Run evaluation stage when set.")
+    parser.add_argument(
+        "--skip-eval",
+        action="store_true",
+        help="Skip evaluation even if --evaluate is set (useful for quick starts).",
+    )
     parser.add_argument(
         "--eval-tokenizer",
         help="Tokenizer path used for evaluation (defaults to run tokenizer target directory).",
@@ -246,7 +251,7 @@ def main() -> None:
         },
     )
 
-    if args.evaluate and args.evaluation_dataset:
+    if args.evaluate and not args.skip_eval and args.evaluation_dataset:
         from src import eval_medical
 
         eval_output = run_dir / "evaluation.json"
@@ -254,6 +259,9 @@ def main() -> None:
 
         def _run_evaluation() -> Dict[str, str]:
             results = {}
+            # Read recommended knobs from environment to avoid expanding CLI surface.
+            eval_batch = int(os.getenv("TOKALIGN_EVAL_BATCH", "32"))
+            eval_maxlen = int(os.getenv("TOKALIGN_EVAL_MAXLEN", "1024"))
             for dataset_item in args.evaluation_dataset:
                 if ":" in dataset_item:
                     dataset_name, split = dataset_item.split(":", maxsplit=1)
@@ -267,6 +275,8 @@ def main() -> None:
                         dataset_name=dataset_name,
                         split=split,
                         max_samples=None if args.max_eval_samples <= 0 else args.max_eval_samples,
+                        batch_size=eval_batch,
+                        max_length=eval_maxlen,
                     )
                 }
             with open(eval_output, "w", encoding="utf-8") as fp:

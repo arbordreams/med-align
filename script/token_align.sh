@@ -1,8 +1,9 @@
 #!/bin/sh
 
 # Retains the original parallel alignment flow as the default. Setting
-# TOKALIGN_MODE=medical switches to the monolingual medical pipeline while
-# still falling back to the upstream behaviour when unset.
+# TOKALIGN_MODE=medical switches to the monolingual medical pipeline.
+# In medical mode, FastText is the default embedding backend for a zero-build
+# quick start; GloVe is used only when GLOVE_DIR is explicitly provided.
 
 export MAIN_DIR="/path/2/TokAlign/"
 # git clone https://github.com/stanfordnlp/GloVe.git

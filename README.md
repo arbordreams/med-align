@@ -9,9 +9,22 @@ We propose an efficient method named TokAlign to replace the vocabulary of LLM f
 
 ## How to run?
 
-### Set up an virtual environment
+### Environment prerequisites
+
+- Python **3.12.x** (the pipeline is tested against CPython 3.12.3)
+- CUDA **12.8** drivers + runtime (Torch 2.8.0 CUDA 12.8 wheels)
+- An NVIDIA GPU with at least 40 GB RAM for the full medical alignment (H100 class recommended)
+
+Quick sanity checks on a fresh machine:
+
 ```
-conda create -n tokalign python=3.10
+python --version        # Expect 3.12.x
+nvidia-smi              # Expect CUDA Version: 12.8
+```
+
+### Set up a virtual environment
+```
+conda create -n tokalign python=3.12
 conda activate tokalign
 
 # Install PyTorch first. Use the CUDA 12.8 wheel on Linux GPU hosts:
@@ -23,7 +36,19 @@ pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
 pip install -r requirements.txt
 ```
 
+`requirements.txt` pins modern PyPI builds compatible with Python 3.12, including the precompiled `fasttext-wheel>=0.9.2` distribution required for the FastText embedding backend.
+
+The medical pipeline is tested with **Python 3.12**, **CUDA 12.8**, and **PyTorch 2.8.0**. Confirm your interpreter with `python --version` before running the installers.
+
 Linux-only extras (`deepspeed`, `bitsandbytes`) are guarded by environment markers and will be skipped automatically on unsupported platforms. `flash-attn` is installed best-effort by the helper script and is optional for the medical pipeline.
+
+### RunPod quickstart
+
+On a fresh RunPod Torch 2.8 (CUDA 12.8) image, the entire setup and a tiny end-to-end run can be launched with:
+
+```
+git clone https://github.com/your-org/align-medical.git && cd align-medical && chmod +x install_deps.sh && ./install_deps.sh && bash script/quickstart_runpod.sh
+```
 
 ### Prepare tokenized data (parallel mode)
 
@@ -53,7 +78,7 @@ export GLOVE_DIR="/abs/path/to/GloVe"  # contains compiled binaries
 # Optional knobs
 export MEDICAL_BYTE_BUDGET=$((5 * 1024 * 1024 * 1024))   # 5GB limit
 export MEDICAL_TERM_TOP_K=800
-export TOKALIGN_EMBEDDING_BACKEND=fasttext  # default is glove
+export TOKALIGN_EMBEDDING_BACKEND=fasttext  # default is fasttext (via fasttext-wheel)
 
 # Stage 1: aggregate corpus, mine medical terms, tokenize with mirrored text.
 bash script/convert2glove_corpus.sh
@@ -87,7 +112,7 @@ python script/run_medical_pipeline.py \
   --source-tokenizer EleutherAI/pythia-1b \
   --target-tokenizer google/gemma-2b \
   --source-model EleutherAI/pythia-1b \
-  --embedding-backend glove \
+  --embedding-backend fasttext \
   --evaluation-dataset medical_benchmark:test \
   --evaluate
 ```

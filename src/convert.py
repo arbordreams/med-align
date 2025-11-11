@@ -75,6 +75,8 @@ def trans2switch(
 
             tgt_embed[i] = src_embed[tj]
             tgt_lm_head[i] = src_lm_head[tj]
+            if i > 0 and i % 50000 == 0:
+                print(f"[convert] Processed {i}/{tgt_len} tokens...")
 
         if missing_targets:
             print(
@@ -82,6 +84,7 @@ def trans2switch(
                 f"outside the source vocabulary (max index {src_len - 1}). First few: {missing_targets[:10]}"
             )
 
+        print(f"[convert] Finalizing model with target vocab size {tgt_len}...")
         src_model.resize_token_embeddings(tgt_len)
 
         src_params[_EMBED_DICT[src_model.config.model_type]] = tgt_embed.to(dtype)
