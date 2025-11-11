@@ -1,7 +1,6 @@
 import numpy as np
 import json
 from tqdm import tqdm
-import random
 import argparse
 
 def load_glove_model(File):
