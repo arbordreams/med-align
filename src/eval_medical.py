@@ -16,7 +16,7 @@ from typing import List, Sequence
 
 import datasets
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 
 DEFAULT_DATASETS: List[str] = [
@@ -32,32 +32,119 @@ def evaluate_perplexity(
     dataset_name: str,
     split: str,
     max_samples: int | None = None,
+    batch_size: int = 32,
+    max_length: int = 1024,
 ) -> float:
     """
     Compute a simple perplexity metric over the requested dataset split.
     """
 
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
-    model = AutoModelForCausalLM.from_pretrained(model_path, dtype=torch.float32)
-    model.eval()
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA required for eval")
+
+    # Enable TF32 for improved throughput on Hopper (H100)
+    torch.backends.cuda.matmul.allow_tf32 = True  # type: ignore[attr-defined]
+    try:
+        torch.backends.cudnn.allow_tf32 = True  # type: ignore[attr-defined]
+    except Exception:
+        pass
+    try:
+        torch.set_float32_matmul_precision("high")
+    except Exception:
+        pass
+
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    dtype = torch.bfloat16
+    model = None
+    try:
+        cfg = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+        if hasattr(cfg, "attn_implementation"):
+            setattr(cfg, "attn_implementation", "flash_attention_2")
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            config=cfg,
+            torch_dtype=dtype,
+            trust_remote_code=True,
+        )
+    except Exception:
+        # Fallback if config tweak is not supported
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            torch_dtype=dtype,
+            trust_remote_code=True,
+        )
+    model.to("cuda").eval()
 
     # Use streaming to avoid downloading entire large datasets
     ds = datasets.load_dataset(dataset_name, split=split, streaming=True)
-    
+
     losses: List[float] = []
     count = 0
+    batch_texts: List[str] = []
+    # Allow adaptive downshifting on OOM if batch_size <= 0 is provided or OOM occurs.
+    current_bs = batch_size if batch_size and batch_size > 0 else 64
+    last_oom_error = None  # store last CUDA OOM to re-raise with context when needed
+
+    def _process_batch(texts: List[str]) -> bool:
+        nonlocal losses, count, current_bs, last_oom_error
+        if not texts:
+            return True
+        enc = tokenizer(
+            texts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=max_length,
+        )
+        enc = {k: v.to("cuda", non_blocking=True) for k, v in enc.items()}
+        try:
+            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+                out = model(**enc, labels=enc["input_ids"])
+                losses.append(float(out.loss.detach().cpu()))
+            count += len(texts)
+            return True
+        except torch.cuda.OutOfMemoryError as e:
+            last_oom_error = e
+            torch.cuda.empty_cache()
+            # Downshift micro-batch and signal failure to retry with smaller chunk.
+            current_bs = max(1, current_bs // 2)
+            return False
     for example in ds:
         if max_samples and count >= max_samples:
             break
         text = example.get("text") or example.get("document") or example.get("abstract") or ""
         if not text:
             continue
-        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
-        with torch.no_grad():
-            output = model(**inputs, labels=inputs["input_ids"])
-            loss = float(output.loss.detach().cpu())
-            losses.append(loss)
-        count += 1
+        batch_texts.append(text)
+        if len(batch_texts) >= current_bs:
+            # Try to process; if OOM, reduce current_bs and retry with a smaller slice.
+            while len(batch_texts) >= current_bs:
+                if _process_batch(batch_texts[:current_bs]):
+                    batch_texts = batch_texts[current_bs:]
+                else:
+                    # If we dropped to bs=1 and still OOM, give up early with a clear error.
+                    if current_bs <= 1:
+                        raise RuntimeError(
+                            "CUDA out of memory during evaluation at batch size 1; "
+                            "reduce --batch-size or --max-length and retry."
+                        ) from last_oom_error
+
+    # Flush remaining
+    if batch_texts and (not max_samples or count < max_samples):
+        # Process any remaining texts in micro-batches of current_bs
+        while batch_texts:
+            bs = min(current_bs, len(batch_texts))
+            if _process_batch(batch_texts[:bs]):
+                batch_texts = batch_texts[bs:]
+            else:
+                if current_bs <= 1:
+                    raise RuntimeError(
+                        "CUDA out of memory while flushing remaining texts at batch size 1; "
+                        "reduce --batch-size or --max-length and retry."
+                    ) from last_oom_error
 
     if not losses:
         return float("nan")
@@ -80,8 +167,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-samples",
         type=int,
-        default=128,
+        default=50,
         help="Maximum number of samples to evaluate per dataset (0 = all samples).",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=32,
+        help="Number of texts per forward pass.",
+    )
+    parser.add_argument(
+        "--max-length",
+        type=int,
+        default=1024,
+        help="Maximum sequence length for tokenization.",
     )
     parser.add_argument(
         "--log-missing",
@@ -135,6 +234,8 @@ def main() -> None:
             dataset_name=dataset_name,
             split=split,
             max_samples=None if args.max_samples <= 0 else args.max_samples,
+            batch_size=args.batch_size,
+            max_length=args.max_length,
         )
         results[f"{dataset_name}:{split}"] = {"perplexity": perplexity}
 

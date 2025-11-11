@@ -3,6 +3,7 @@
 # - Supports both virtualenv installs (if .venv exists) and global installs.
 # - Installs PyTorch 2.8.0 (CUDA 12.8 wheels) first.
 # - Installs remaining requirements, excluding torch/flash-attn to avoid conflicts.
+# - Pulls in fasttext-wheel>=0.9.2 for the FastText embedding backend (prebuilt for Python 3.12).
 # - Installs flash-attn with robust fallbacks (prebuilt wheels first, then source with --no-build-isolation).
 # - Verifies flash-attn import; exits non-zero if unavailable.
 
@@ -10,6 +11,17 @@ set -euo pipefail
 
 echo "[install] Python: $(python -V 2>/dev/null || true)"
 echo "[install] PIP: $(pip -V 2>/dev/null || true)"
+
+# Ensure we are running on Python 3.12+, which is required by the pinned dependencies.
+python - <<'PY'
+import sys
+version = ".".join(map(str, sys.version_info[:3]))
+if sys.version_info < (3, 12):
+    raise SystemExit(
+        f"TokAlign requires Python >= 3.12 (found {version}). "
+        "Upgrade the interpreter before running install_deps.sh."
+    )
+PY
 
 # Activate venv if present; otherwise proceed with global install
 if [ -d ".venv" ]; then
