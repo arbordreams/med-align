@@ -11,7 +11,7 @@ export MODEL="1b"
 
 export TGT="gemma"
 
-MODEL_NAME="./data/pythia2${TGT}/${MODEL}/glove"
+MODEL_NAME="${MODEL_NAME:-mistralai/Mistral-7B-v0.3}"
 
 # export DATASET_PATH="./data/pretrain-dataset/pile00-${TGT}-tokenized"
 export DATASET_PATH="./data/pretrain-dataset/pile00-sample-${TGT}-tokenized"

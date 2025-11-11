@@ -43,19 +43,19 @@ if [ "${TOKALIGN_MODE}" = "medical" ]; then
   exit 0
 fi
 
-export MODLE_PATH1="EleutherAI/pythia-1b"
-export TOKENIZER_PATH1="EleutherAI/pythia-1b"
-export GLOVE_TRAIN_PATH1="${MAIN_DIR}/data/pretrain-dataset/mix-pythia-glove"
-export GLOVE_VECTOR_PATH1="${MAIN_DIR}/data/vec-mix-pythia.txt"
+export MODLE_PATH1="mistralai/Mistral-7B-v0.3"
+export TOKENIZER_PATH1="mistralai/Mistral-7B-v0.3"
+export GLOVE_TRAIN_PATH1="${MAIN_DIR}/data/pretrain-dataset/mix-mistral-glove"
+export GLOVE_VECTOR_PATH1="${MAIN_DIR}/data/vec-mix-mistral.txt"
 
-export MODLE_PATH2="google/gemma-2b"
-export TOKENIZER_PATH2="google/gemma-2b"
-export GLOVE_TRAIN_PATH2="${MAIN_DIR}/data/pretrain-dataset/mix-gemma-glove"
-export GLOVE_VECTOR_PATH2="${MAIN_DIR}/data/vec-mix-gemma.txt"
+export MODLE_PATH2="BioMistral/BioMistral-7B"
+export TOKENIZER_PATH2="BioMistral/BioMistral-7B"
+export GLOVE_TRAIN_PATH2="${MAIN_DIR}/data/pretrain-dataset/mix-biomistral-glove"
+export GLOVE_VECTOR_PATH2="${MAIN_DIR}/data/vec-mix-biomistral.txt"
 
-export TGT_ID_2_SRC_ID_GOLD_PATH="${MAIN_DIR}/data/Vocab_count/gemma2pythia.json"
+export TGT_ID_2_SRC_ID_GOLD_PATH="${MAIN_DIR}/data/Vocab_count/biomistral2mistral.json"
 # The output path of token alignment matrix
-export TGT_ID_2_SRC_ID_RES_PATH="${MAIN_DIR}/data/pythia2gemma/align_matrix.json"
+export TGT_ID_2_SRC_ID_RES_PATH="${MAIN_DIR}/data/mistral2biomistral/align_matrix.json"
 
 
 # Stage-1: train glove vectors

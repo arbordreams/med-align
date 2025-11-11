@@ -27,7 +27,7 @@ def trans2switch(
 ):
     src_model = AutoModelForCausalLM.from_pretrained(
         src_clm_path,
-        dtype=torch.float32,
+        torch_dtype=torch.float32,
         trust_remote_code=True,
         device_map="cpu",
     )
@@ -85,12 +85,18 @@ def trans2switch(
             )
 
         print(f"[convert] Finalizing model with target vocab size {tgt_len}...")
+        # Resize token embeddings first, then copy weights directly to modules
         src_model.resize_token_embeddings(tgt_len)
-
-        src_params[_EMBED_DICT[src_model.config.model_type]] = tgt_embed.to(dtype)
-        src_params[_LMHEAD_DICT[src_model.config.model_type]] = tgt_lm_head.to(dtype)
-
-        src_model.load_state_dict(src_params)
+        # Copy into the resized modules to avoid state_dict shape mismatches
+        src_model.get_input_embeddings().weight.data.copy_(tgt_embed.to(src_model.get_input_embeddings().weight.dtype))
+        lm_head = getattr(src_model, "lm_head", None)
+        if lm_head is not None and hasattr(lm_head, "weight"):
+            lm_head.weight.data.copy_(tgt_lm_head.to(lm_head.weight.dtype))
+        else:
+            # Fallback for uncommon heads
+            state = src_model.state_dict()
+            state[_LMHEAD_DICT[src_model.config.model_type]] = tgt_lm_head.to(state[_LMHEAD_DICT[src_model.config.model_type]].dtype)
+            src_model.load_state_dict(state, strict=False)
         src_model.save_pretrained(tgt_clm_path)
         tgt_tok.save_pretrained(tgt_clm_path)
 
@@ -105,7 +111,7 @@ def random_permute(
 
     src_model = AutoModelForCausalLM.from_pretrained(
         src_clm_path,
-        dtype=torch.float32,
+        torch_dtype=torch.float32,
         trust_remote_code=True,
         device_map="cpu",
     )
@@ -134,10 +140,14 @@ def random_permute(
 
         src_model.resize_token_embeddings(len(tgt_tok))
 
-        src_params[_EMBED_DICT[src_model.config.model_type]] = tgt_embed.to(dtype)
-        src_params[_LMHEAD_DICT[src_model.config.model_type]] = tgt_lm_head.to(dtype)
-
-        src_model.load_state_dict(src_params)
+        src_model.get_input_embeddings().weight.data.copy_(tgt_embed.to(src_model.get_input_embeddings().weight.dtype))
+        lm_head = getattr(src_model, "lm_head", None)
+        if lm_head is not None and hasattr(lm_head, "weight"):
+            lm_head.weight.data.copy_(tgt_lm_head.to(lm_head.weight.dtype))
+        else:
+            state = src_model.state_dict()
+            state[_LMHEAD_DICT[src_model.config.model_type]] = tgt_lm_head.to(state[_LMHEAD_DICT[src_model.config.model_type]].dtype)
+            src_model.load_state_dict(state, strict=False)
         src_model.save_pretrained(tgt_clm_path)
         tgt_tok.save_pretrained(tgt_clm_path)
 
@@ -152,7 +162,7 @@ def random_initial_all(
 
     src_model = AutoModelForCausalLM.from_pretrained(
         src_clm_path,
-        dtype=torch.float32,
+        torch_dtype=torch.float32,
         trust_remote_code=True,
         device_map="cpu",
     )
@@ -173,14 +183,26 @@ def random_initial_all(
 
         src_model.resize_token_embeddings(src_len + tgt_len)
 
-        resized_params = dict(src_model.named_parameters())
-
-        src_params[_EMBED_DICT[src_model.config.model_type]] = resized_params[_EMBED_DICT[src_model.config.model_type]][src_len:].to(dtype)
-        src_params[_LMHEAD_DICT[src_model.config.model_type]] = resized_params[_LMHEAD_DICT[src_model.config.model_type]][src_len:].to(dtype)
+        # After first resize, take the newly-added rows as initial values for target vocab
+        new_embed = src_model.get_input_embeddings().weight.data[src_len:].clone()
+        new_lm_head = getattr(src_model, "lm_head", None)
+        if new_lm_head is not None and hasattr(new_lm_head, "weight"):
+            new_lm = new_lm_head.weight.data[src_len:].clone()
+        else:
+            # Fallback to state_dict if head is not a direct attribute
+            state = src_model.state_dict()
+            new_lm = state[_LMHEAD_DICT[src_model.config.model_type]][src_len:].clone()
 
         src_model.resize_token_embeddings(tgt_len)
 
-        src_model.load_state_dict(src_params)
+        # Copy the newly created slices into the correctly-sized resized modules
+        src_model.get_input_embeddings().weight.data.copy_(new_embed.to(src_model.get_input_embeddings().weight.dtype))
+        if hasattr(src_model, "lm_head") and hasattr(src_model.lm_head, "weight"):
+            src_model.lm_head.weight.data.copy_(new_lm.to(src_model.lm_head.weight.dtype))
+        else:
+            state_after = src_model.state_dict()
+            state_after[_LMHEAD_DICT[src_model.config.model_type]] = new_lm.to(state_after[_LMHEAD_DICT[src_model.config.model_type]].dtype)
+            src_model.load_state_dict(state_after, strict=False)
         src_model.save_pretrained(tgt_clm_path)
         tgt_tok.save_pretrained(tgt_clm_path)
 
@@ -196,7 +218,7 @@ def random_initial_aug(
 
     src_model = AutoModelForCausalLM.from_pretrained(
         src_clm_path,
-        dtype=torch.float32,
+        torch_dtype=torch.float32,
         trust_remote_code=True,
         device_map="cpu",
     )

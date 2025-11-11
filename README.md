@@ -70,9 +70,9 @@ reuses the same text for both source and target tokenizers. Set
 ```
 export TOKALIGN_MODE=medical
 export MEDICAL_INPUTS="/abs/path/to/medical/shard_dir"
-export TOKENIZER_PATH1="EleutherAI/pythia-1b"
-export TOKENIZER_PATH2="google/gemma-2b"
-export MODLE_PATH1="EleutherAI/pythia-1b"
+export TOKENIZER_PATH1="mistralai/Mistral-7B-v0.3"
+export TOKENIZER_PATH2="BioMistral/BioMistral-7B"
+export MODLE_PATH1="mistralai/Mistral-7B-v0.3"
 export GLOVE_DIR="/abs/path/to/GloVe"  # contains compiled binaries
 
 # Optional knobs
@@ -109,9 +109,9 @@ retry-aware stages and evaluation hooks:
 ```
 python script/run_medical_pipeline.py \
   --input /abs/path/to/medical/shard_dir \
-  --source-tokenizer EleutherAI/pythia-1b \
-  --target-tokenizer google/gemma-2b \
-  --source-model EleutherAI/pythia-1b \
+  --source-tokenizer mistralai/Mistral-7B-v0.3 \
+  --target-tokenizer BioMistral/BioMistral-7B \
+  --source-model mistralai/Mistral-7B-v0.3 \
   --embedding-backend fasttext \
   --evaluation-dataset medical_benchmark:test \
   --evaluate

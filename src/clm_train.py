@@ -32,13 +32,13 @@ class ScriptArguments:
     )
     max_seq_length: Optional[int] = field(default=512)
     model_name: Optional[str] = field(
-        default="Salesforce/codegen25-7b-multi",
+        default="mistralai/Mistral-7B-v0.3",
         metadata={
             "help": "The model that you want to train from the Hugging Face hub. E.g. gpt2, gpt2-xl, bert, etc."
         },
     )
     tokenizer_path: Optional[str] = field(
-        default="Salesforce/codegen25-7b-multi",
+        default="mistralai/Mistral-7B-v0.3",
         metadata={
             "help": "The tokenizer path that you want to load."
         },
@@ -72,7 +72,7 @@ class ScriptArguments:
         metadata={"help": "Enables fp16 training."},
     )
     bf16: Optional[bool] = field(
-        default=False,
+        default=True,
         metadata={"help": "Enables bf16 training."},
     )
     packing: Optional[bool] = field(
@@ -114,7 +114,7 @@ class ScriptArguments:
         metadata={"help": "Enables loading model in 4bit."},
     )
     use_gradient_checkpointing: Optional[bool] = field(
-        default=False,
+        default=True,
         metadata={"help": "Enables Gradient Checkpointing."},
     )
     dataset_text_field: str = field(default="text", metadata={"help": "Dataset field to use as input text."})

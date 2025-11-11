@@ -279,12 +279,16 @@ def evaluate_pubmedqa(
     *,
     model_path: str,
     tokenizer_path: str,
-    subset: str = "pqa_labeled",
     split: str = "test",
     max_samples: int | None = 200,
 ) -> dict:
     """
-    Simple zero-shot PubMedQA accuracy using conditional likelihood over {yes,no,maybe}.
+    Zero-shot PubMedQA accuracy using conditional likelihood over {yes,no,maybe}.
+
+    Uses the official PubMedQA dataset from bigbio/pubmed_qa with the
+    pubmed_qa_labeled_fold0_source config.
+    Only uses the requested split (default: test) for evaluation.
+    No fallbacks to train/validation and no alternate datasets.
     """
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA required for eval")
@@ -294,41 +298,24 @@ def evaluate_pubmedqa(
     model = _load_model_with_fallbacks(model_path, tokenizer)
     dtype = next(model.parameters()).dtype
 
-    # Load dataset with fallback to multiple real medical QA datasets
-    import datasets as _ds
-    def _load(split_name: str):
-        # Try multiple real medical QA datasets in order of preference
-        dataset_configs = [
-            ("bigbio/pubmed_qa", "pubmed_qa_labeled_fold0_source", None),  # Most reliable
-            ("bigbio/pubmed_qa", None, None),  # Try without config
-            ("ncbi/pubmed-qa", None, None),
-            ("medalpaca/medical_meadow_mediqa", None, None),
-            ("pubmed_qa", None, None),  # Fallback to simple name
-        ]
-        last_exc = None
-        for ds_id, config, _ in dataset_configs:
-            try:
-                if config:
-                    return _ds.load_dataset(ds_id, config, split=split_name, streaming=True)
-                else:
-                    return _ds.load_dataset(ds_id, split=split_name, streaming=True)
-            except Exception as e:
-                last_exc = e
-                continue
-        raise last_exc if last_exc else RuntimeError("Failed to load any medical QA dataset.")
-    
+    # Load ONLY the official PubMedQA labeled fold0 source split.
     try:
-        ds = _load(split)
-    except Exception:
-        for fb in ("validation", "train"):
-            try:
-                logger.warning("Requested split '%s' unavailable; falling back to '%s'.", split, fb)
-                ds = _load(fb)
-                break
-            except Exception:
-                continue
-        else:
-            raise
+        ds = datasets.load_dataset(
+            "bigbio/pubmed_qa",
+            "pubmed_qa_labeled_fold0_source",
+            split=split,
+            streaming=True,
+        )
+        logger.info(
+            "Loaded dataset bigbio/pubmed_qa config=%s split=%s (streaming).",
+            "pubmed_qa_labeled_fold0_source",
+            split,
+        )
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to load bigbio/pubmed_qa config 'pubmed_qa_labeled_fold0_source' split '{split}'. "
+            "Ensure the dataset is available and the split exists (use only the test split)."
+        ) from e
     labels = ["yes", "no", "maybe"]
     correct = 0
     total = 0
@@ -349,42 +336,22 @@ def evaluate_pubmedqa(
     for example in ds:
         if max_samples and total >= max_samples:
             break
-        # Handle different dataset field names
-        question = (
-            example.get("question") or 
-            example.get("quest") or 
-            example.get("Question") or
-            example.get("input") or
-            ""
-        )
-        ctx = (
-            example.get("context") or 
-            example.get("contexts") or 
-            example.get("Context") or
-            example.get("long_answer") or
-            example.get("abstract") or
-            ""
-        )
-        label = (
-            example.get("final_decision") or 
-            example.get("label") or 
-            example.get("Label") or
-            example.get("final_decision_str") or
-            example.get("answer") or
-            ""
-        ).strip().lower()
-        
-        # Normalize label to yes/no/maybe
-        if label in ["yes", "no", "maybe"]:
-            pass  # Already normalized
-        elif label in ["y", "n", "m"]:
-            label = {"y": "yes", "n": "no", "m": "maybe"}[label]
-        elif label in ["1", "0", "-1"] or label.isdigit():
-            # Some datasets use numeric labels
-            label_map = {"1": "yes", "0": "no", "-1": "maybe"}
-            label = label_map.get(label, label)
-        else:
-            # Skip if label doesn't match expected format
+        # bigbio/pubmed_qa 'source' schema field names (upper-case)
+        # QUESTION: str, CONTEXTS: List[str], final_decision: str in {"yes","no","maybe"}
+        try:
+            question = example["QUESTION"]
+            contexts_list = example["CONTEXTS"]
+            label = str(example["final_decision"]).strip().lower()
+        except KeyError:
+            # Malformed record; skip
+            continue
+
+        if not isinstance(contexts_list, list):
+            contexts_list = [str(contexts_list)]
+        ctx = " ".join([c for c in contexts_list if isinstance(c, str)])
+
+        # Validate label
+        if label not in labels:
             continue
             
         if label not in labels or not question:

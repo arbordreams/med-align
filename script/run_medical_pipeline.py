@@ -83,9 +83,9 @@ def _retry(stage_name: str, max_retries: int, backoff: float, fn: Callable[[], D
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the medical TokAlign pipeline end-to-end.")
     parser.add_argument("--input", action="append", required=True, help="Medical corpus JSONL shard or directory.")
-    parser.add_argument("--source-tokenizer", required=True, help="Source tokenizer/model identifier.")
-    parser.add_argument("--target-tokenizer", required=True, help="Target tokenizer/model identifier.")
-    parser.add_argument("--source-model", required=True, help="Base model checkpoint for alignment.")
+    parser.add_argument("--source-tokenizer", default="mistralai/Mistral-7B-v0.3", help="Source tokenizer/model identifier.")
+    parser.add_argument("--target-tokenizer", default="BioMistral/BioMistral-7B", help="Target tokenizer/model identifier.")
+    parser.add_argument("--source-model", default="mistralai/Mistral-7B-v0.3", help="Base model checkpoint for alignment.")
     parser.add_argument(
         "--source-model-fallback",
         help="Fallback model path if augmented source tokenizer lacks config (default: use --source-model).",
@@ -296,16 +296,37 @@ def main() -> None:
                 qa_out = run_dir / "eval" / "pubmedqa.json"
                 os.makedirs(qa_out.parent, exist_ok=True)
                 try:
-                    qa_res = eval_medical.evaluate_pubmedqa(
-                        model_path=stage_outputs["apply"]["model_dir"],
-                        tokenizer_path=eval_tokenizer,
-                        subset=os.getenv("TOKALIGN_PUBMEDQA_SUBSET", "pqa_labeled"),
-                        split=os.getenv("TOKALIGN_PUBMEDQA_SPLIT", "test"),
+                    # Evaluate baseline (base Mistral model)
+                    baseline_res = eval_medical.evaluate_pubmedqa(
+                        model_path=args.source_model,
+                        tokenizer_path=args.source_tokenizer,
+                        split="test",
                         max_samples=int(os.getenv("TOKALIGN_PUBMEDQA_MAX", "200")),
                     )
+                    # Evaluate adapted model
+                    adapted_res = eval_medical.evaluate_pubmedqa(
+                        model_path=stage_outputs["apply"]["model_dir"],
+                        tokenizer_path=eval_tokenizer,
+                        split="test",
+                        max_samples=int(os.getenv("TOKALIGN_PUBMEDQA_MAX", "200")),
+                    )
+                    # Calculate improvement
+                    improvement = {
+                        "accuracy_delta": adapted_res["accuracy"] - baseline_res["accuracy"],
+                        "accuracy_relative": (
+                            ((adapted_res["accuracy"] - baseline_res["accuracy"]) / baseline_res["accuracy"]) * 100
+                            if baseline_res["accuracy"] > 0
+                            else 0.0
+                        ),
+                    }
+                    qa_results = {
+                        "baseline": baseline_res,
+                        "adapted": adapted_res,
+                        "improvement": improvement,
+                    }
                     with open(qa_out, "w", encoding="utf-8") as fp:
-                        json.dump(qa_res, fp, indent=2)
-                    results["pubmedqa"] = {"results_path": str(qa_out), **qa_res}
+                        json.dump(qa_results, fp, indent=2)
+                    results["pubmedqa"] = {"results_path": str(qa_out), **qa_results}
                 except Exception as qa_exc:  # pragma: no cover
                     LOGGER.warning("PubMedQA evaluation skipped/failed: %s", qa_exc)
                     results["pubmedqa"] = {"status": "error", "message": str(qa_exc)}

@@ -487,18 +487,18 @@ def main():
         "revision": model_args.model_revision,
     }
     if model_args.config_name:
-        config = AutoConfig.from_pretrained(model_args.config_name, **config_kwargs)
+        config = AutoConfig.from_pretrained(model_args.config_name, trust_remote_code=True, **config_kwargs)
     elif model_args.model_name_or_path:
         candidate_path = model_args.model_name_or_path
         local_config = os.path.join(candidate_path, "config.json")
         if os.path.isfile(local_config):
-            config = AutoConfig.from_pretrained(candidate_path, **config_kwargs)
+            config = AutoConfig.from_pretrained(candidate_path, trust_remote_code=True, **config_kwargs)
         else:
             logger.warning(
-                "Unrecognized config in %s. Falling back to AutoConfig.from_pretrained with EleutherAI/pythia-1b.",
+                "Unrecognized config in %s. Falling back to AutoConfig.from_pretrained with mistralai/Mistral-7B-v0.3.",
                 candidate_path,
             )
-            config = AutoConfig.from_pretrained("EleutherAI/pythia-1b", **config_kwargs)
+            config = AutoConfig.from_pretrained("mistralai/Mistral-7B-v0.3", trust_remote_code=True, **config_kwargs)
     else:
         config = CONFIG_MAPPING[model_args.model_type]()
         logger.warning("You are instantiating a new config instance from scratch.")
@@ -518,9 +518,9 @@ def main():
         "revision": model_args.model_revision,
     }
     if model_args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(model_args.tokenizer_name, **tokenizer_kwargs)
+        tokenizer = AutoTokenizer.from_pretrained(model_args.tokenizer_name, trust_remote_code=True, **tokenizer_kwargs)
     elif model_args.model_name_or_path:
-        tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, **tokenizer_kwargs)
+        tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, trust_remote_code=True, **tokenizer_kwargs)
     else:
         raise ValueError(
             "You are instantiating a new tokenizer from scratch. This is not supported by this script."

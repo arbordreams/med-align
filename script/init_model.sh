@@ -3,8 +3,8 @@
 export MAIN_DIR="/path/2/TokAlign/"
 cd ${MAIN_DIR}
 
-export MODLE_PATH1=${MODLE_PATH1:-"EleutherAI/pythia-1b"}
-export TOKENIZER_PATH2=${TOKENIZER_PATH2:-"google/gemma-2b"}
+export MODLE_PATH1=${MODLE_PATH1:-"mistralai/Mistral-7B-v0.3"}
+export TOKENIZER_PATH2=${TOKENIZER_PATH2:-"BioMistral/BioMistral-7B"}
 
 TOKALIGN_MODE=${TOKALIGN_MODE:-parallel}
 
@@ -29,10 +29,10 @@ if [ "${TOKALIGN_MODE}" = "medical" ]; then
 fi
 
 # Parallel fallback
-# export TGT_ID_2_SRC_ID_RES_PATH="${MAIN_DIR}/data/pythia2gemma/align_matrix.json"
-export TGT_ID_2_SRC_ID_RES_PATH="${MAIN_DIR}/data/pythia2gemma/align_matrix_demo.json"
+# export TGT_ID_2_SRC_ID_RES_PATH="${MAIN_DIR}/data/mistral2biomistral/align_matrix.json"
+export TGT_ID_2_SRC_ID_RES_PATH="${MAIN_DIR}/data/mistral2biomistral/align_matrix_demo.json"
 
-export OUTPUT_PATH="${MAIN_DIR}/data/pythia2gemma/TokAlign-Init-1B"
+export OUTPUT_PATH="${MAIN_DIR}/data/mistral2biomistral/TokAlign-Init-7B"
 
 python src/convert.py \
     -m ${TGT_ID_2_SRC_ID_RES_PATH} \
