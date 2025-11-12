@@ -125,6 +125,56 @@ def _resolve_tokenizer_model_path(tokenizer_path: str, fallback_model: str) -> T
         return tokenizer_path, tokenizer_path
     return fallback_model, tokenizer_path
 
+def _train_fasttext_embedding(
+    corpus_path: str,
+    save_file: str,
+    *,
+    epochs: int,
+    mincount: int,
+    lr: float,
+    thread: int,
+) -> str:
+    """
+    Train a FastText model on corpus_path and write vectors to save_file.
+    Implemented at module scope so it can be pickled by ProcessPoolExecutor.
+    """
+    # Local import inside worker to avoid import-time failures when backend not selected
+    try:
+        import fasttext  # type: ignore[import]
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError(
+            "FastText backend selected but the `fasttext` module is unavailable. "
+            "Install the prebuilt `fasttext-wheel>=0.9.2` package (pip install fasttext-wheel)."
+        ) from exc
+    model = fasttext.train_unsupervised(
+        input=corpus_path,
+        model="skipgram",
+        dim=300,
+        epoch=epochs,
+        minCount=mincount,
+        lr=lr,
+        thread=thread,
+    )
+    bin_path = str(Path(save_file).with_suffix(".bin"))
+    model.save_model(bin_path)
+    words = model.get_words(include_freq=True)
+    if isinstance(words, tuple):
+        word_iterable = zip(*words)
+    else:
+        word_iterable = words
+    with open(save_file, "w", encoding="utf-8") as fp:
+        for entry in word_iterable:
+            # entry may be "word", ("word", freq), or a non-string ID depending on the fasttext build
+            if isinstance(entry, (tuple, list)):
+                word = entry[0]
+            else:
+                word = entry
+            if not isinstance(word, str):
+                word = str(word)
+            vector = model.get_word_vector(word)
+            fp.write(word + " " + " ".join(map(str, vector.tolist())) + "\n")
+    return save_file
+
 
 def tokenize_corpus(
     *,
@@ -255,44 +305,6 @@ def train_embeddings_and_align(
             _run_subprocess(cmd, cwd=glove_dir)
     else:
         # Train FastText embeddings using python binding (parallel for source and target).
-        def _train_fasttext_embedding(corpus_path: str, save_file: str, *, epochs: int, mincount: int, lr: float, thread: int) -> str:
-            # Local import inside worker to avoid pickling issues
-            try:
-                import fasttext  # type: ignore[import]
-            except ImportError as exc:  # pragma: no cover
-                raise RuntimeError(
-                    "FastText backend selected but the `fasttext` module is unavailable. "
-                    "Install the prebuilt `fasttext-wheel>=0.9.2` package (pip install fasttext-wheel)."
-                ) from exc
-            model = fasttext.train_unsupervised(
-                input=corpus_path,
-                model="skipgram",
-                dim=300,
-                epoch=epochs,
-                minCount=mincount,
-                lr=lr,
-                thread=thread,
-            )
-            bin_path = str(Path(save_file).with_suffix(".bin"))
-            model.save_model(bin_path)
-            words = model.get_words(include_freq=True)
-            if isinstance(words, tuple):
-                word_iterable = zip(*words)
-            else:
-                word_iterable = words
-            with open(save_file, "w", encoding="utf-8") as fp:
-                for entry in word_iterable:
-                    # entry may be "word", ("word", freq), or a non-string ID depending on the fasttext build
-                    if isinstance(entry, (tuple, list)):
-                        word = entry[0]
-                    else:
-                        word = entry
-                    if not isinstance(word, str):
-                        word = str(word)
-                    vector = model.get_word_vector(word)
-                    fp.write(word + " " + " ".join(map(str, vector.tolist())) + "\n")
-            return save_file
-
         jobs = [
             (source_glove_path, str(vec_source)),
             (target_glove_path, str(vec_target)),
