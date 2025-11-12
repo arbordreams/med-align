@@ -25,9 +25,9 @@ def trans2switch(
     tgt_tok_path="./data/gemma-2b",
     random_shuffle=-1,
 ):
-    # Prefer half-precision and GPU/offload when available to reduce RAM usage for 7B checkpoints.
+    # Prefer full precision on GPU when available (96GB VRAM fits 7B comfortably).
     use_cuda = torch.cuda.is_available()
-    preferred_dtype = torch.bfloat16 if use_cuda else torch.bfloat16
+    preferred_dtype = torch.float32 if use_cuda else torch.float32
     device_map = "auto" if use_cuda else "cpu"
     try:
         src_model = AutoModelForCausalLM.from_pretrained(
@@ -38,22 +38,31 @@ def trans2switch(
             low_cpu_mem_usage=True,
         )
     except Exception:
-        # Fallback to fp16 on CPU/GPU; final fallback fp32 CPU as last resort
+        # Memory/driver fallback: bf16 on GPU, then fp16, then fp32 CPU as last resort
         try:
             src_model = AutoModelForCausalLM.from_pretrained(
                 src_clm_path,
-                torch_dtype=torch.float16 if use_cuda else torch.float16,
+                torch_dtype=torch.bfloat16 if use_cuda else torch.bfloat16,
                 trust_remote_code=True,
                 device_map=device_map,
                 low_cpu_mem_usage=True,
             )
         except Exception:
-            src_model = AutoModelForCausalLM.from_pretrained(
-                src_clm_path,
-                torch_dtype=torch.float32,
-                trust_remote_code=True,
-                device_map="cpu",
-            )
+            try:
+                src_model = AutoModelForCausalLM.from_pretrained(
+                    src_clm_path,
+                    torch_dtype=torch.float16 if use_cuda else torch.float16,
+                    trust_remote_code=True,
+                    device_map=device_map,
+                    low_cpu_mem_usage=True,
+                )
+            except Exception:
+                src_model = AutoModelForCausalLM.from_pretrained(
+                    src_clm_path,
+                    torch_dtype=torch.float32,
+                    trust_remote_code=True,
+                    device_map="cpu",
+                )
     tgt_tok = AutoTokenizer.from_pretrained(tgt_tok_path,  trust_remote_code=True)
 
     # Load trans matrix
