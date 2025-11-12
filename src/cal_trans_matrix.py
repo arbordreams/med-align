@@ -163,7 +163,8 @@ if __name__ == '__main__':
                     supl_id += 1
                     break
             if not found_unk:
-                td[tid] = 0
+                # Use sentinel -1 to signal missing mapping; convert.py will zero-initialize these entries.
+                td[tid] = -1
                 supl_id += 1
             continue
 
@@ -183,7 +184,8 @@ if __name__ == '__main__':
                     supl_id += 1
                     break
             if not found_unk:
-                td[tid] = 0
+                # Use sentinel -1 to signal low-confidence mapping; convert.py will zero-initialize.
+                td[tid] = -1
                 supl_id += 1
             continue
 
@@ -193,13 +195,13 @@ if __name__ == '__main__':
             lix = set(top_k_indices(sim[id1_idx], 2)) - set(top_k_indices(sim[id1_idx], 1))
             lid = ids2[lix.pop()]
 
-        # Conservative guard: ensure mapping is a valid int within [0, g_vocab_len2)
+        # Conservative guard: ensure mapping is an int and either valid index or sentinel -1
         try:
             v = int(lid)
         except (TypeError, ValueError):
-            v = 0
-        if v < 0 or v >= g_vocab_len2:
-            v = 0
+            v = -1
+        if v >= g_vocab_len2 or v < -1:
+            v = -1
         td[tid] = v
 
     print(f"{supl_id} ids are suppled with gold transition dictionary.")

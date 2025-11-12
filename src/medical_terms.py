@@ -22,6 +22,10 @@ from typing import Iterable, List, Sequence, Tuple
 
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
+try:  # optional stopwords without hard dependency
+    from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS as _STOPWORDS  # type: ignore
+except Exception:  # pragma: no cover
+    _STOPWORDS = set()  # minimal fallback
 from transformers import AutoTokenizer
 
 logger = logging.getLogger(__name__)
@@ -42,8 +46,18 @@ def _read_corpus(path: str, max_docs: int | None = None) -> List[str]:
 
 
 def _tokenize(text: str) -> List[str]:
-    # Basic whitespace split paired with medical-friendly lowercasing.
-    return [tok for tok in text.strip().lower().split() if tok]
+    # Basic whitespace split paired with medical-friendly lowercasing and conservative filtering.
+    toks = [tok for tok in text.strip().lower().split() if tok]
+    filtered: List[str] = []
+    for tok in toks:
+        if len(tok) < 3:
+            continue
+        if tok.isdigit():
+            continue
+        if tok in _STOPWORDS:
+            continue
+        filtered.append(tok)
+    return filtered
 
 
 def mine_terms(
@@ -71,18 +85,18 @@ def mine_terms(
         Optional cap on the number of documents to inspect.
     """
 
-    texts = _read_corpus(corpus_path, max_docs=max_docs)
-    if not texts:
-        logger.warning("No texts were found in %s; returning an empty term list.", corpus_path)
-        return []
-
+    # TF-IDF requires the full text list; frequency mode can stream to avoid OOM on large corpora.
     if use_tfidf:
+        texts = _read_corpus(corpus_path, max_docs=max_docs)
+        if not texts:
+            logger.warning("No texts were found in %s; returning an empty term list.", corpus_path)
+            return []
         vectorizer = TfidfVectorizer(tokenizer=_tokenize, lowercase=False)
         tfidf_matrix = vectorizer.fit_transform(texts)
         scores = tfidf_matrix.max(axis=0).toarray().flatten()
         vocab = np.array(vectorizer.get_feature_names_out())
         top_indices = np.argsort(scores)[::-1]
-        terms = []
+        terms: List[str] = []
         for idx in top_indices:
             term = vocab[idx]
             if term.strip() and term not in terms:
@@ -92,8 +106,18 @@ def mine_terms(
         return terms
 
     counter: Counter[str] = Counter()
-    for text in texts:
-        counter.update(_tokenize(text))
+    with open(corpus_path, "r", encoding="utf-8") as fp:
+        for idx, line in enumerate(fp):
+            if max_docs is not None and idx >= max_docs:
+                break
+            try:
+                record = json.loads(line)
+            except Exception:
+                continue
+            text = record.get("text")
+            if not text:
+                continue
+            counter.update(_tokenize(text))
 
     filtered = [(term, count) for term, count in counter.items() if count >= min_count]
     filtered.sort(key=lambda item: item[1], reverse=True)
@@ -127,8 +151,16 @@ def augment_tokenizer(
             continue
         sanitized_terms.append(stripped)
 
-    if sanitized_terms:
-        tokenizer.add_tokens(sanitized_terms)
+    # SentencePiece-friendly: prefix tokens with ▁ to increase match rate on spm tokenizers.
+    sp_like = any(k in tokenizer.__class__.__name__.lower() for k in ("llama", "mistral"))
+    sp_terms: List[str] = []
+    for term in sanitized_terms:
+        if sp_like and not term.startswith("▁"):
+            sp_terms.append("▁" + term)
+        else:
+            sp_terms.append(term)
+    if sp_terms:
+        tokenizer.add_tokens(sp_terms)
     else:
         logger.info("No new terms to add; tokenizer vocabulary remains unchanged.")
 

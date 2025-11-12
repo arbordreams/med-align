@@ -25,12 +25,35 @@ def trans2switch(
     tgt_tok_path="./data/gemma-2b",
     random_shuffle=-1,
 ):
-    src_model = AutoModelForCausalLM.from_pretrained(
-        src_clm_path,
-        torch_dtype=torch.float32,
-        trust_remote_code=True,
-        device_map="cpu",
-    )
+    # Prefer half-precision and GPU/offload when available to reduce RAM usage for 7B checkpoints.
+    use_cuda = torch.cuda.is_available()
+    preferred_dtype = torch.bfloat16 if use_cuda else torch.bfloat16
+    device_map = "auto" if use_cuda else "cpu"
+    try:
+        src_model = AutoModelForCausalLM.from_pretrained(
+            src_clm_path,
+            torch_dtype=preferred_dtype,
+            trust_remote_code=True,
+            device_map=device_map,
+            low_cpu_mem_usage=True,
+        )
+    except Exception:
+        # Fallback to fp16 on CPU/GPU; final fallback fp32 CPU as last resort
+        try:
+            src_model = AutoModelForCausalLM.from_pretrained(
+                src_clm_path,
+                torch_dtype=torch.float16 if use_cuda else torch.float16,
+                trust_remote_code=True,
+                device_map=device_map,
+                low_cpu_mem_usage=True,
+            )
+        except Exception:
+            src_model = AutoModelForCausalLM.from_pretrained(
+                src_clm_path,
+                torch_dtype=torch.float32,
+                trust_remote_code=True,
+                device_map="cpu",
+            )
     tgt_tok = AutoTokenizer.from_pretrained(tgt_tok_path,  trust_remote_code=True)
 
     # Load trans matrix

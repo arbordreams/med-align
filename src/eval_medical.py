@@ -311,11 +311,25 @@ def evaluate_pubmedqa(
             "pubmed_qa_labeled_fold0_source",
             split,
         )
-    except Exception as e:
-        raise RuntimeError(
-            f"Failed to load bigbio/pubmed_qa config 'pubmed_qa_labeled_fold0_source' split '{split}'. "
-            "Ensure the dataset is available and the split exists (use only the test split)."
-        ) from e
+    except Exception:
+        # Fallback to commonly available labeled fold0 config without the _source suffix.
+        try:
+            ds = datasets.load_dataset(
+                "bigbio/pubmed_qa",
+                "pubmed_qa_labeled_fold0",
+                split=split,
+                streaming=True,
+            )
+            logger.info(
+                "Loaded dataset bigbio/pubmed_qa config=%s split=%s (streaming).",
+                "pubmed_qa_labeled_fold0",
+                split,
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to load bigbio/pubmed_qa configs 'pubmed_qa_labeled_fold0_source' and 'pubmed_qa_labeled_fold0' "
+                f"for split '{split}'. Ensure the dataset/config/split exist."
+            ) from e
     labels = ["yes", "no", "maybe"]
     correct = 0
     total = 0
