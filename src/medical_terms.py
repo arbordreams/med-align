@@ -113,7 +113,7 @@ def augment_tokenizer(
     added_tokens, skipped_tokens
     """
 
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
     existing_vocab = set(tokenizer.get_vocab().keys())
 
     sanitized_terms: List[str] = []

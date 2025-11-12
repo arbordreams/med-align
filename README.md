@@ -13,7 +13,14 @@ We propose an efficient method named TokAlign to replace the vocabulary of LLM f
 
 - Python **3.12.x** (the pipeline is tested against CPython 3.12.3)
 - CUDA **12.8** drivers + runtime (Torch 2.8.0 CUDA 12.8 wheels)
-- An NVIDIA GPU with at least 40 GB RAM for the full medical alignment (H100 class recommended)
+- An NVIDIA GPU with at least 40 GB RAM for the full medical alignment
+
+**Recommended GPU configurations:**
+- **1x GH200 (96GB)**: ARM64 + H100, 64 vCPUs, 432 GiB RAM — **Recommended for cost efficiency** ($1.49/hr, 1.5-2x faster than H100)
+- **1x H100 (80GB PCIe)**: x86_64, 26 vCPUs, 200 GiB RAM — Standard configuration ($2.49/hr)
+- **8x H100 (80GB SXM5)**: x86_64, 208 vCPUs, 1800 GiB RAM — For large-scale multi-GPU training ($23.92/hr)
+
+See [GH200 ARM64 Support](docs/GH200_ARM64_SUPPORT.md) for detailed information on GH200 setup and performance comparisons.
 
 Quick sanity checks on a fresh machine:
 
@@ -70,9 +77,9 @@ reuses the same text for both source and target tokenizers. Set
 ```
 export TOKALIGN_MODE=medical
 export MEDICAL_INPUTS="/abs/path/to/medical/shard_dir"
-export TOKENIZER_PATH1="mistralai/Mistral-7B-v0.3"
-export TOKENIZER_PATH2="BioMistral/BioMistral-7B"
-export MODLE_PATH1="mistralai/Mistral-7B-v0.3"
+export TOKENIZER_PATH1="BioMistral/BioMistral-7B"
+export TOKENIZER_PATH2="mistralai/Mistral-7B-v0.3"
+export MODLE_PATH1="BioMistral/BioMistral-7B"
 export GLOVE_DIR="/abs/path/to/GloVe"  # contains compiled binaries
 
 # Optional knobs
@@ -109,9 +116,9 @@ retry-aware stages and evaluation hooks:
 ```
 python script/run_medical_pipeline.py \
   --input /abs/path/to/medical/shard_dir \
-  --source-tokenizer mistralai/Mistral-7B-v0.3 \
-  --target-tokenizer BioMistral/BioMistral-7B \
-  --source-model mistralai/Mistral-7B-v0.3 \
+  --source-tokenizer BioMistral/BioMistral-7B \
+  --target-tokenizer mistralai/Mistral-7B-v0.3 \
+  --source-model BioMistral/BioMistral-7B \
   --embedding-backend fasttext \
   --evaluation-dataset medical_benchmark:test \
   --evaluate
@@ -123,7 +130,7 @@ Logs are written under `runs/logs/` and a roll-up summary can be found in
 ### Modes: Smoke test vs Research
 
 - Smoke test (default quickstart): small corpus (~5MB), fast config for sanity checks.
-- Research mode (overnight, quality-first): larger corpus cap (default 5GB), more terms, more pivots, longer embedding training, tuned for H100.
+- Research mode (overnight, quality-first): larger corpus cap (default 5GB), more terms, more pivots, longer embedding training, tuned for H100 or GH200.
 
 Run research-grade pipeline:
 
@@ -134,19 +141,31 @@ bash script/run_medical_pipeline_research.sh
 Key research defaults:
 - Byte budget: 5 GiB
 - Term mining: top-k=2000, min-frequency=3, TF-IDF enabled
-- FastText: epochs=30, minCount=1, lr=0.05, dim=300, threads=12 (per worker, 2 workers = 24 threads total)
+- FastText: epochs=30, minCount=1, lr=0.05, dim=300, threads=12 (per worker, 2 workers = 24 threads total on H100)
 - Alignment: pivot_count=2000
 - Tokenization: workers=24
 - Evaluation: perplexity and QA enabled (QA fail-soft if dataset/split missing)
 
-Recommended env on H100:
+**Hardware-specific configurations:**
+
+The research script auto-detects your hardware and optimizes thread counts:
+- **GH200 (64 vCPUs)**: Auto-scales to 64 threads for OMP/MKL, 32 threads per FastText worker
+- **H100 PCIe (26 vCPUs)**: Uses 24 threads for OMP/MKL, 12 threads per FastText worker
+
+Recommended env (auto-configured by research script):
 ```
-export OMP_NUM_THREADS=24
-export MKL_NUM_THREADS=24
+export OMP_NUM_THREADS=24  # H100 PCIe; GH200 uses 64
+export MKL_NUM_THREADS=24  # H100 PCIe; GH200 uses 64
 export TOKENIZERS_PARALLELISM=true
 export NVIDIA_TF32_OVERRIDE=1
 export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256,expandable_segments:True
 ```
+
+**Performance comparison:**
+- **1x GH200**: ~3-5 hours per run, $4.47-7.45 per run (1.5-2x faster, 3-5x cheaper)
+- **1x H100 PCIe**: ~6-10 hours per run, $14.94-24.90 per run
+
+See [GH200 ARM64 Support](docs/GH200_ARM64_SUPPORT.md) for detailed performance benchmarks and setup instructions.
 
 #### Curated medical corpus builder
 

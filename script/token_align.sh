@@ -43,18 +43,18 @@ if [ "${TOKALIGN_MODE}" = "medical" ]; then
   exit 0
 fi
 
-export MODLE_PATH1="mistralai/Mistral-7B-v0.3"
-export TOKENIZER_PATH1="mistralai/Mistral-7B-v0.3"
+export MODLE_PATH1="BioMistral/BioMistral-7B"
+export TOKENIZER_PATH1="BioMistral/BioMistral-7B"
 export GLOVE_TRAIN_PATH1="${MAIN_DIR}/data/pretrain-dataset/mix-mistral-glove"
 export GLOVE_VECTOR_PATH1="${MAIN_DIR}/data/vec-mix-mistral.txt"
 
-export MODLE_PATH2="BioMistral/BioMistral-7B"
-export TOKENIZER_PATH2="BioMistral/BioMistral-7B"
+export MODLE_PATH2="mistralai/Mistral-7B-v0.3"
+export TOKENIZER_PATH2="mistralai/Mistral-7B-v0.3"
 export GLOVE_TRAIN_PATH2="${MAIN_DIR}/data/pretrain-dataset/mix-biomistral-glove"
 export GLOVE_VECTOR_PATH2="${MAIN_DIR}/data/vec-mix-biomistral.txt"
 
-export TGT_ID_2_SRC_ID_GOLD_PATH="${MAIN_DIR}/data/Vocab_count/biomistral2mistral.json"
-# The output path of token alignment matrix
+export TGT_ID_2_SRC_ID_GOLD_PATH="${MAIN_DIR}/data/Vocab_count/mistral2biomistral.json"
+# The output path of token alignment matrix (target=Mistral → source=BioMistral)
 export TGT_ID_2_SRC_ID_RES_PATH="${MAIN_DIR}/data/mistral2biomistral/align_matrix.json"
 
 

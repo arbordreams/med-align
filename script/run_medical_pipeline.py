@@ -83,9 +83,9 @@ def _retry(stage_name: str, max_retries: int, backoff: float, fn: Callable[[], D
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the medical TokAlign pipeline end-to-end.")
     parser.add_argument("--input", action="append", required=True, help="Medical corpus JSONL shard or directory.")
-    parser.add_argument("--source-tokenizer", default="mistralai/Mistral-7B-v0.3", help="Source tokenizer/model identifier.")
-    parser.add_argument("--target-tokenizer", default="BioMistral/BioMistral-7B", help="Target tokenizer/model identifier.")
-    parser.add_argument("--source-model", default="mistralai/Mistral-7B-v0.3", help="Base model checkpoint for alignment.")
+    parser.add_argument("--source-tokenizer", default="BioMistral/BioMistral-7B", help="Source tokenizer/model identifier.")
+    parser.add_argument("--target-tokenizer", default="mistralai/Mistral-7B-v0.3", help="Target tokenizer/model identifier.")
+    parser.add_argument("--source-model", default="BioMistral/BioMistral-7B", help="Base model checkpoint for alignment.")
     parser.add_argument(
         "--source-model-fallback",
         help="Fallback model path if augmented source tokenizer lacks config (default: use --source-model).",
@@ -162,8 +162,27 @@ def main() -> None:
         args.term_top_k = 2000
         args.min_term_frequency = 3
         args.use_tfidf = True
-        # Tokenization throughput
-        args.tokenizer_workers = max(args.tokenizer_workers, 24)
+        # Tokenization throughput: auto-scale based on available CPU if not explicitly set
+        # If user didn't set tokenizer_workers, try to detect from environment or use reasonable default
+        if args.tokenizer_workers == 8:  # Default value from argparse
+            # Try to detect from environment or use a reasonable default
+            import os
+            try:
+                num_vcpus = int(os.environ.get("OMP_NUM_THREADS", "24"))
+                # For systems with many vCPUs (>=48): use 75% (optimal for I/O)
+                # For smaller systems (<48): use 100% (use all available)
+                if num_vcpus >= 48:
+                    optimal_workers = int(num_vcpus * 3 / 4)
+                else:
+                    optimal_workers = num_vcpus
+                # Cap at 64 workers (diminishing returns beyond this)
+                optimal_workers = min(optimal_workers, 64)
+                args.tokenizer_workers = max(optimal_workers, 24)  # Minimum 24 for research mode
+            except (ValueError, TypeError):
+                args.tokenizer_workers = 24  # Fallback to safe default
+        else:
+            # User explicitly set tokenizer_workers, but ensure minimum for research mode
+            args.tokenizer_workers = max(args.tokenizer_workers, 24)
         # Alignment quality
         args.pivot_count = max(args.pivot_count, 2000)
         # Evaluation breadth

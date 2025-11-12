@@ -1,6 +1,7 @@
 import numpy as np
 import json
 from tqdm import tqdm
+import random
 import argparse
 
 def load_glove_model(File):
@@ -192,7 +193,14 @@ if __name__ == '__main__':
             lix = set(top_k_indices(sim[id1_idx], 2)) - set(top_k_indices(sim[id1_idx], 1))
             lid = ids2[lix.pop()]
 
-        td[tid] = int(lid)
+        # Conservative guard: ensure mapping is a valid int within [0, g_vocab_len2)
+        try:
+            v = int(lid)
+        except (TypeError, ValueError):
+            v = 0
+        if v < 0 or v >= g_vocab_len2:
+            v = 0
+        td[tid] = v
 
     print(f"{supl_id} ids are suppled with gold transition dictionary.")
 

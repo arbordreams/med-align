@@ -61,13 +61,40 @@ echo "[install] Installing tf-keras for transformers TensorFlow compatibility...
 pip install --no-cache-dir tf-keras
 
 echo "[install] Installing flash-attn 2.8.3 (required, pre-built wheel for torch 2.8.0)..."
-WHEEL_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl"
-pip install --no-cache-dir "${WHEEL_URL}"
-if [ $? -ne 0 ]; then
-  echo "[install] ERROR: Failed to install flash-attn wheel."
-  exit 1
+# Detect architecture for flash-attn wheel
+ARCH=$(uname -m)
+PY_VER=$(python -c "import sys; print(f'cp{sys.version_info.major}{sys.version_info.minor}')")
+echo "[install] Detected architecture: ${ARCH}, Python: ${PY_VER}"
+
+if [ "${ARCH}" = "aarch64" ] || [ "${ARCH}" = "arm64" ]; then
+  echo "[install] ARM64 detected - attempting to install flash-attn from source (no pre-built wheel available)..."
+  echo "[install] NOTE: Flash-attn compilation on ARM64 can be memory-intensive."
+  echo "[install] Limiting parallel jobs to avoid memory exhaustion (MAX_JOBS=4)..."
+  # Try to install from source for ARM64 with limited parallel jobs
+  # This prevents memory exhaustion during compilation (common issue on ARM64)
+  if ! MAX_JOBS=4 pip install --no-cache-dir flash-attn==2.8.3 --no-build-isolation; then
+    echo "[install] WARNING: flash-attn source build failed."
+    echo "[install] This may require:"
+    echo "[install]   - CUDA toolkit 12.8+ installed"
+    echo "[install]   - Build tools (gcc, make, ninja)"
+    echo "[install]   - Sufficient RAM (compilation can use 8GB+)"
+    echo "[install] Continuing without flash-attn (pipeline will run slower but still functional)."
+    echo "[install] You can retry flash-attn installation later if needed."
+    # Don't fail the entire installation - flash-attn is optional for basic functionality
+  fi
+else
+  # x86_64: use pre-built wheel
+  WHEEL_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-${PY_VER}-${PY_VER}-linux_${ARCH}.whl"
+  echo "[install] Attempting to install pre-built wheel: ${WHEEL_URL}"
+  pip install --no-cache-dir "${WHEEL_URL}" || {
+    echo "[install] WARNING: Pre-built wheel failed, falling back to source build..."
+    pip install --no-cache-dir flash-attn==2.8.3 --no-build-isolation || {
+      echo "[install] ERROR: Failed to install flash-attn."
+      exit 1
+    }
+  }
 fi
-echo "[install] Successfully installed flash-attn"
+echo "[install] flash-attn installation completed"
 
 echo "[install] Verifying flash-attn import..."
 python - <<'PY'
@@ -76,7 +103,36 @@ try:
     import flash_attn  # noqa: F401
     print("[install] ✓ flash-attn is installed and importable.")
 except Exception as e:
-    print(f"[install] ERROR: flash-attn import failed: {e}")
+    print(f"[install] WARNING: flash-attn import failed: {e}")
+    print("[install] Pipeline will run without flash-attn (slower but functional).")
+    print("[install] To fix: ensure CUDA toolkit and build tools are installed, then rebuild.")
+    # Don't exit - flash-attn is optional for basic functionality
+PY
+
+echo "[install] Verifying PyTorch CUDA availability..."
+python - <<'PY'
+import sys
+try:
+    import torch
+    print(f"[install] PyTorch version: {torch.__version__}")
+    if torch.cuda.is_available():
+        print(f"[install] ✓ CUDA available in PyTorch")
+        print(f"[install] ✓ PyTorch CUDA version: {torch.version.cuda}")
+        print(f"[install] ✓ GPU count: {torch.cuda.device_count()}")
+        for i in range(torch.cuda.device_count()):
+            print(f"[install]   - GPU {i}: {torch.cuda.get_device_name(i)}")
+    else:
+        print("[install] WARNING: CUDA not available in PyTorch")
+        print("[install] This may indicate:")
+        print("[install]   - PyTorch was installed without CUDA support")
+        print("[install]   - CUDA drivers are not properly installed")
+        print("[install]   - Architecture mismatch (ARM64 vs x86_64)")
+        sys.exit(1)
+except ImportError:
+    print("[install] ERROR: PyTorch not installed")
+    sys.exit(1)
+except Exception as e:
+    print(f"[install] ERROR: PyTorch verification failed: {e}")
     sys.exit(1)
 PY
 

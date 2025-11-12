@@ -1,9 +1,16 @@
 from dataclasses import dataclass, field
 import os
 import subprocess
-from typing import Optional
+import sys
+from typing import Optional, List
 
-from transformers import HfArgumentParser, TrainingArguments, Trainer
+from transformers import (
+    HfArgumentParser,
+    TrainingArguments,
+    Trainer,
+    EarlyStoppingCallback,
+    set_seed as hf_set_seed,
+)
 from clm_utils import *
 
 from lr_callback import LRCallback
@@ -144,6 +151,29 @@ class ScriptArguments:
         default="no",
         metadata={"help": "The path to resume."},
     )
+    # Early stopping
+    early_stopping_patience: Optional[int] = field(
+        default=300,
+        metadata={"help": "Number of evaluation calls with no improvement to wait before stopping."},
+    )
+    early_stopping_threshold: Optional[float] = field(
+        default=0.0,
+        metadata={"help": "Minimum improvement in the monitored metric to be considered significant."},
+    )
+    # Reproducibility
+    seed: Optional[int] = field(
+        default=0,
+        metadata={"help": "Random seed for reproducibility."},
+    )
+    # Optional general-domain mix for regularization
+    general_dataset_name: Optional[str] = field(
+        default=None,
+        metadata={"help": "Optional path to a general-domain dataset (load_from_disk) to mix with medical data."},
+    )
+    general_mix_ratio: Optional[float] = field(
+        default=0.0,
+        metadata={"help": "Proportion of general-domain samples in the mixed dataset (0.0 disables mixing)."},
+    )
     finetune_embed_only: Optional[bool] = field(
         default=False,
         metadata={"help": "Wether to finetune the embedding parameters of model only."},
@@ -163,6 +193,24 @@ class ScriptArguments:
 
 
 def main(args):
+    # Reproducibility: set seeds early
+    try:
+        hf_set_seed(args.seed)
+    except Exception:
+        pass
+    # Basic environment logging for reproducibility
+    try:
+        import torch as _torch
+        import transformers as _transformers
+        import datasets as _datasets
+        print("Environment:")
+        print(f"- Python: {sys.version.split()[0]}")
+        print(f"- Torch: {_torch.__version__}")
+        print(f"- Transformers: {_transformers.__version__}")
+        print(f"- Datasets: {_datasets.__version__}")
+        print(f"- CUDA available: {_torch.cuda.is_available()}")
+    except Exception:
+        pass
     # training arguments
     is_deepspeed_peft_enabled = (
         os.environ.get("ACCELERATE_USE_DEEPSPEED", "False").lower() == "true" and args.use_peft_lora
@@ -224,6 +272,17 @@ def main(args):
 
     if is_deepspeed_peft_enabled:
         trainer.add_callback(SaveDeepSpeedPeftModelCallback(trainer, save_steps=args.save_steps))
+    # Early stopping if evaluation is enabled
+    if args.evaluation_strategy != "no":
+        try:
+            trainer.add_callback(
+                EarlyStoppingCallback(
+                    early_stopping_patience=args.early_stopping_patience,
+                    early_stopping_threshold=args.early_stopping_threshold,
+                )
+            )
+        except Exception:
+            pass
 
     if args.use_peft_lora:
         peft_module_casting_to_bf16(trainer.model, args)

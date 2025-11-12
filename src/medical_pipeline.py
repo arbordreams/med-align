@@ -27,6 +27,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 import concurrent.futures as _futures
 
+from transformers import AutoTokenizer
+
 try:
     from . import medical_corpus  # type: ignore
     from . import medical_terms  # type: ignore
@@ -348,13 +350,32 @@ def train_embeddings_and_align(
 
     align_matrix_path = align_dir / "align_matrix.json"
     gold_mapping = gold_mapping_path or str(vocab_count_path)
+    # Infer vocab sizes from tokenizers to ensure full ID coverage during alignment
+    try:
+        source_tok = AutoTokenizer.from_pretrained(tokenizer_source, trust_remote_code=True)
+        target_tok = AutoTokenizer.from_pretrained(tokenizer_target, trust_remote_code=True)
+        source_vocab_size = int(getattr(source_tok, "vocab_size", None) or len(source_tok))
+        target_vocab_size = int(getattr(target_tok, "vocab_size", None) or len(target_tok))
+        logger.info("Tokenizer vocab sizes: source=%d, target=%d", source_vocab_size, target_vocab_size)
+    except Exception as tok_exc:  # pragma: no cover
+        logger.warning(
+            "Failed to load tokenizers to infer vocab sizes (%s). Falling back to 32768 for both.",
+            tok_exc,
+        )
+        # Reasonable default for Mistral-7B / BioMistral-7B; prevents out-of-range alignment
+        source_vocab_size = 32768
+        target_vocab_size = 32768
     cmd = [
         sys.executable,
         str(SCRIPT_ROOT / "src" / "cal_trans_matrix.py"),
         "-s",
         str(vec_source),
+        "-s1",
+        str(source_vocab_size),
         "-t",
         str(vec_target),
+        "-s2",
+        str(target_vocab_size),
         "-g",
         gold_mapping,
         "-o",

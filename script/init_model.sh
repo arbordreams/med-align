@@ -3,8 +3,8 @@
 export MAIN_DIR="/path/2/TokAlign/"
 cd ${MAIN_DIR}
 
-export MODLE_PATH1=${MODLE_PATH1:-"mistralai/Mistral-7B-v0.3"}
-export TOKENIZER_PATH2=${TOKENIZER_PATH2:-"BioMistral/BioMistral-7B"}
+export MODLE_PATH1=${MODLE_PATH1:-"BioMistral/BioMistral-7B"}
+export TOKENIZER_PATH2=${TOKENIZER_PATH2:-"mistralai/Mistral-7B-v0.3"}
 
 TOKALIGN_MODE=${TOKALIGN_MODE:-parallel}
 

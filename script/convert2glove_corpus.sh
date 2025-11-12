@@ -83,21 +83,21 @@ fi
 # sample corpus for demonstration
 export TRAIN_FILE="${MAIN_DIR}/data/pretrain-corpus/lang-code-math-mix.sample.json"
 
-# Source Tokenizer
-export MODLE_PATH1="mistralai/Mistral-7B-v0.3"
-export TOKENIZER_PATH1="mistralai/Mistral-7B-v0.3"
+# Source Tokenizer (knowledge source)
+export MODLE_PATH1="BioMistral/BioMistral-7B"
+export TOKENIZER_PATH1="BioMistral/BioMistral-7B"
 
 export DATASET_PATH1="${MAIN_DIR}/data/pretrain-dataset/mix-mistral-tok"
 export GLOVE_TRAIN_PATH1="${MAIN_DIR}/data/pretrain-dataset/mix-mistral-glove"
 
-# Target Tokenizer
-export MODLE_PATH2="BioMistral/BioMistral-7B"
-export TOKENIZER_PATH2="BioMistral/BioMistral-7B"
+# Target Tokenizer (general tokenizer)
+export MODLE_PATH2="mistralai/Mistral-7B-v0.3"
+export TOKENIZER_PATH2="mistralai/Mistral-7B-v0.3"
 
 export DATASET_PATH2="${MAIN_DIR}/data/pretrain-dataset/mix-biomistral-tok"
 export GLOVE_TRAIN_PATH2="${MAIN_DIR}/data/pretrain-dataset/mix-biomistral-glove"
 
-export MATRIX_EVAL_PATH="${MAIN_DIR}/data/pretrain-dataset/mistral-2-biomistral-glove-eval-mix"
+export MATRIX_EVAL_PATH="${MAIN_DIR}/data/pretrain-dataset/biomistral-2-mistral-glove-eval-mix"
 
 export NUM_WORKERS=48
 

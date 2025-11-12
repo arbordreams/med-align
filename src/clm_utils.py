@@ -186,6 +186,31 @@ def create_datasets(tokenizer, args):
     train_data = dataset["train"]
     valid_data = dataset["test"] if "test" in dataset else dataset["validation"]
     print(f"Size of the train set: {len(train_data)}. Size of the validation set: {len(valid_data)}")
+    # Optional general-domain mixing for train_data only
+    try:
+        mix_ratio = float(getattr(args, "general_mix_ratio", 0.0) or 0.0)
+        general_path = getattr(args, "general_dataset_name", None)
+        if general_path and mix_ratio > 0.0:
+            general_ds = load_from_disk(general_path)
+            general_train = general_ds["train"] if "train" in general_ds else list(general_ds.values())[0]
+            # Compute number of general samples to add to achieve the requested ratio:
+            # mix_ratio = general / (medical + general) => general = medical * mix_ratio / (1 - mix_ratio)
+            if mix_ratio >= 1.0:
+                target_general = len(train_data)
+            else:
+                target_general = int(len(train_data) * (mix_ratio / max(1e-6, (1.0 - mix_ratio))))
+            target_general = max(1, min(target_general, len(general_train)))
+            # Sample without replacement if possible
+            if target_general < len(general_train):
+                indices = random.sample(range(len(general_train)), target_general)
+                general_sample = general_train.select(indices)
+            else:
+                general_sample = general_train
+            print(f"General-domain mixing enabled: adding {len(general_sample)} samples to {len(train_data)} medical samples (ratio ~{mix_ratio:.3f}).")
+            train_data = concatenate_datasets([train_data, general_sample])
+            print(f"Mixed train size: {len(train_data)}")
+    except Exception as mix_exc:
+        print(f"[WARN] General-domain mixing disabled due to error: {mix_exc}")
     chars_per_token = chars_token_ratio(train_data, tokenizer, args.dataset_text_field) if 'text' in train_data.features else 1
     print(f"The character to token ratio of the dataset is: {chars_per_token:.2f}")
     train_dataset = ConstantLengthDataset(
