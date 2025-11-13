@@ -77,6 +77,19 @@ def get_default_config() -> Dict[str, Any]:
             "max_retries": 1,
             "retry_backoff": 5.0,
         },
+        "vocab_adaptation": {
+            "enabled": True,
+            "stage1_steps": 2500,
+            "stage2_steps": 2500,
+            "lr_stage1": 6.4e-4,
+            "lr_stage2": 5e-5,
+            "batch_size": 2,
+            "gradient_accumulation": 16,
+            "max_seq_length": 2048,
+            "train_start_idx_stage2": 2560000,
+            "seed": 0,
+            "use_flash_attn": True,
+        },
     }
 
 
@@ -94,6 +107,7 @@ def _validate_config_structure(cfg: Dict[str, Any]) -> None:
         "tokenization",
         "evaluation",
         "pipeline",
+        "vocab_adaptation",
     ]
     for section in required_sections:
         if section not in cfg or not isinstance(cfg[section], dict):
@@ -162,6 +176,31 @@ def _validate_config_structure(cfg: Dict[str, Any]) -> None:
         raise ValueError("pipeline.max_retries must be an integer")
     if not isinstance(cfg["pipeline"].get("retry_backoff", 0.0), (int, float)):
         raise ValueError("pipeline.retry_backoff must be a number")
+
+    # vocab_adaptation
+    va = cfg["vocab_adaptation"]
+    if not isinstance(va.get("enabled", True), bool):
+        raise ValueError("vocab_adaptation.enabled must be a boolean")
+    if not isinstance(va.get("stage1_steps", 0), int):
+        raise ValueError("vocab_adaptation.stage1_steps must be an integer")
+    if not isinstance(va.get("stage2_steps", 0), int):
+        raise ValueError("vocab_adaptation.stage2_steps must be an integer")
+    if not isinstance(va.get("lr_stage1", 0.0), (int, float)):
+        raise ValueError("vocab_adaptation.lr_stage1 must be a number")
+    if not isinstance(va.get("lr_stage2", 0.0), (int, float)):
+        raise ValueError("vocab_adaptation.lr_stage2 must be a number")
+    if not isinstance(va.get("batch_size", 0), int):
+        raise ValueError("vocab_adaptation.batch_size must be an integer")
+    if not isinstance(va.get("gradient_accumulation", 0), int):
+        raise ValueError("vocab_adaptation.gradient_accumulation must be an integer")
+    if not isinstance(va.get("max_seq_length", 0), int):
+        raise ValueError("vocab_adaptation.max_seq_length must be an integer")
+    if not isinstance(va.get("train_start_idx_stage2", 0), int):
+        raise ValueError("vocab_adaptation.train_start_idx_stage2 must be an integer")
+    if not isinstance(va.get("seed", 0), int):
+        raise ValueError("vocab_adaptation.seed must be an integer")
+    if not isinstance(va.get("use_flash_attn", True), bool):
+        raise ValueError("vocab_adaptation.use_flash_attn must be a boolean")
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:

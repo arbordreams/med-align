@@ -1,0 +1,90 @@
+Integrate TokAlign vocabulary adaptation (fine-tuning) into the medical pipeline before evaluation, matching the original TokAlign paper workflow.
+
+## Problem
+The med-align pipeline (`script/run_medical_pipeline.py`) currently evaluates the adapted model immediately after conversion (line 355), before vocabulary adaptation training. The TokAlign paper requires progressive fine-tuning before evaluation.
+
+## TokAlign Paper Workflow
+
+Two-stage progressive fine-tuning:
+- Stage 1: Embeddings-only (`--finetune_embed_only True`, LR=6.4e-4, 2500 steps)
+- Stage 2: Full model (LR=5e-5, 2500 steps, train_start_idx=2560000)
+- Uses bf16, packing, gradient checkpointing, cosine LR scheduler, warmup_ratio=0.03, weight_decay=0.01
+
+## Required Changes
+
+### 1. Add config schema to `src/config_loader.py`
+
+Add to `get_default_config()`:
+```python
+"vocab_adaptation": {
+    "enabled": True,
+    "stage1_steps": 2500,
+    "stage2_steps": 2500,
+    "lr_stage1": 6.4e-4,
+    "lr_stage2": 5e-5,
+    "batch_size": 2,
+    "gradient_accumulation": 16,
+    "max_seq_length": 2048,
+    "train_start_idx_stage2": 2560000,
+    "seed": 0,
+    "use_flash_attn": True,
+}
+```
+
+Add validation in `_validate_config_structure()` for all fields.
+
+### 2. Add `vocab_adaptation()` function to `src/medical_pipeline.py`
+
+Create function that:
+- Takes `run_dir`, `adapted_model_path`, `dataset_path`, and config dict
+- Runs Stage 1: embeddings-only training via subprocess calling `python -m src.clm_train`
+- Runs Stage 2: full model training (loads Stage 1 checkpoint)
+- Returns dict with `stage1_model_dir`, `stage2_model_dir`, `final_model_dir`
+- Uses config values, no hardcoded parameters
+- Handles flash-attn gracefully (check availability, skip flag if not available)
+
+### 3. Integrate into `script/run_medical_pipeline.py`
+
+Insert between "apply_alignment" (line 320) and "evaluation" (line 334):
+
+```python
+if final_cfg["vocab_adaptation"]["enabled"]:
+    stage_outputs["vocab_adaptation"] = _retry(
+        "vocab_adaptation",
+        final_cfg["pipeline"]["max_retries"],
+        final_cfg["pipeline"]["retry_backoff"],
+        lambda: medical_pipeline.vocab_adaptation(
+            run_dir=run_dir,
+            adapted_model_path=stage_outputs["apply"]["model_dir"],
+            dataset_path=stage_outputs["tokenize"].get("dataset_path"),  # or from config
+            config=final_cfg["vocab_adaptation"],
+        )
+    )
+    eval_model_path = stage_outputs["vocab_adaptation"]["final_model_dir"]
+else:
+    eval_model_path = stage_outputs["apply"]["model_dir"]
+```
+
+### 4. Update evaluation to use fine-tuned model
+
+Change evaluation (line 355) to use `eval_model_path` instead of `stage_outputs["apply"]["model_dir"]`.
+
+### 5. Update config files
+
+Add `vocab_adaptation` section to:
+- `configs/research.yaml` (use paper defaults)
+- `configs/production.yaml` (can use shorter steps for iteration)
+
+### 6. Implementation pattern
+
+The `vocab_adaptation()` function should:
+- Build command args from config dict (no hardcoded values)
+- Use subprocess to call `python -m src.clm_train` with all args from config
+- Stage 1: add `--finetune_embed_only True`, use `lr_stage1`, `stage1_steps`
+- Stage 2: load Stage 1 checkpoint, use `lr_stage2`, `stage2_steps`, `train_start_idx_stage2`
+- Both stages: use config values for batch_size, gradient_accumulation, max_seq_length, seed, etc.
+- Check flash-attn availability before adding `--use_flash_attn` flag
+- Follow same error handling and logging pattern as other pipeline functions
+
+All parameters must come from config, no hardcoded values in the implementation.
+

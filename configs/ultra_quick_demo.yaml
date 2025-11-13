@@ -1,10 +1,11 @@
+# Ultra-quick demo preset (≈5MB) — fast end-to-end run
 models:
   source_tokenizer: "BioMistral/BioMistral-7B"
   target_tokenizer: "mistralai/Mistral-7B-v0.3"
   source_model: "BioMistral/BioMistral-7B"
 
 corpus:
-  size_gb: 0.005   # ~5MB
+  size_gb: 0.005   # ~5MB quick demo
   byte_budget: 0   # 0 = derive from size_gb
   deduplicate: true
   hash_name: "sha256"
@@ -20,17 +21,32 @@ embedding:
     epochs: 5
     mincount: 5
     lr: 0.05
-    thread: 8
+    thread: null
 
 alignment:
   pivot_count: 300
   similarity_threshold: 0.3
 
 tokenization:
-  workers: 8
+  workers: null
   cache_dir: null
   min_line_length: 0
 
+# TokAlign vocabulary adaptation (two-stage fine-tune)
+vocab_adaptation:
+  enabled: true
+  stage1_steps: 200
+  stage2_steps: 200
+  lr_stage1: 6.4e-4
+  lr_stage2: 5e-5
+  batch_size: 2
+  gradient_accumulation: 8
+  max_seq_length: 1024
+  train_start_idx_stage2: 102400
+  seed: 0
+  use_flash_attn: true
+
+# Evaluation (disabled for demo speed)
 evaluation:
   enabled: false
   datasets: []

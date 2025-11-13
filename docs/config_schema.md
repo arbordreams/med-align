@@ -45,7 +45,7 @@ Top-level sections
 
 Usage examples
 - Smoke test:
-  script/run_medical_pipeline.py --config configs/smoke_test.yaml --input path/to/small.jsonl
+  script/run_medical_pipeline.py --config configs/ultra_quick_demo.yaml --input path/to/small.jsonl
 - Research:
   script/run_medical_pipeline.py --config configs/research.yaml --input /data/med.jsonl
 - Override via CLI:

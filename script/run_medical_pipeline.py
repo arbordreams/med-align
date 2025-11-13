@@ -183,7 +183,18 @@ def main() -> None:
         except (ValueError, TypeError):
             final_cfg["embedding"]["fasttext"]["thread"] = 12 if args.research_mode else 8
 
-    run_dir = medical_pipeline.create_run_dir(Path(final_cfg["pipeline"]["run_root"]), args.run_id)
+    # Derive a descriptive run_id when not provided: "<config_basename>_<timestamp>"
+    if args.run_id:
+        _run_id = args.run_id
+    else:
+        if cfg_path:
+            cfg_label = Path(cfg_path).stem
+        elif args.research_mode:
+            cfg_label = "research"
+        else:
+            cfg_label = "default"
+        _run_id = f"{cfg_label}_{_timestamp()}"
+    run_dir = medical_pipeline.create_run_dir(Path(final_cfg["pipeline"]["run_root"]), _run_id)
     _setup_logging(run_dir)
     LOGGER.info(config_origin)
     # Archive merged config
@@ -331,6 +342,30 @@ def main() -> None:
         },
     )
 
+    # Optional vocabulary adaptation (fine-tuning) before evaluation
+    eval_model_path = stage_outputs["apply"]["model_dir"]
+    if bool(final_cfg.get("vocab_adaptation", {}).get("enabled", True)):
+        def _run_vocab_adaptation() -> Dict[str, str]:
+            # Prefer the target tokenizer's dataset for adaptation
+            dataset_path = stage_outputs.get("tokenize", {}).get("target_dataset")
+            if not dataset_path:
+                raise RuntimeError("Missing tokenized target dataset path for vocabulary adaptation.")
+            result = medical_pipeline.vocab_adaptation(
+                run_dir=run_dir,
+                adapted_model_path=stage_outputs["apply"]["model_dir"],
+                dataset_path=str(dataset_path),
+                config=final_cfg["vocab_adaptation"],
+            )
+            return result
+
+        stage_outputs["vocab_adaptation"] = _retry(
+            "vocabulary_adaptation",
+            final_cfg["pipeline"]["max_retries"],
+            final_cfg["pipeline"]["retry_backoff"],
+            _run_vocab_adaptation,
+        )
+        eval_model_path = stage_outputs["vocab_adaptation"]["final_model_dir"]
+
     eval_enabled = bool(final_cfg["evaluation"]["enabled"]) and not args.skip_eval
     eval_datasets = list(final_cfg["evaluation"]["datasets"] or [])
     if eval_enabled and eval_datasets:
@@ -352,7 +387,7 @@ def main() -> None:
                 LOGGER.info("Evaluating %s:%s", dataset_name, split)
                 results[f"{dataset_name}:{split}"] = {
                     "perplexity": eval_medical.evaluate_perplexity(
-                        model_path=stage_outputs["apply"]["model_dir"],
+                        model_path=eval_model_path,
                         tokenizer_path=eval_tokenizer,
                         dataset_name=dataset_name,
                         split=split,
@@ -375,7 +410,7 @@ def main() -> None:
                     )
                     # Evaluate adapted model
                     adapted_res = eval_medical.evaluate_pubmedqa(
-                        model_path=stage_outputs["apply"]["model_dir"],
+                        model_path=eval_model_path,
                         tokenizer_path=eval_tokenizer,
                         split="test",
                         max_samples=int(os.getenv("TOKALIGN_PUBMEDQA_MAX", "200")),

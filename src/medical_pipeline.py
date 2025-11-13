@@ -466,6 +466,136 @@ def evaluate_alignment_bleu(
     return str(out_path)
 
 
+def vocab_adaptation(
+    *,
+    run_dir: Path,
+    adapted_model_path: str,
+    dataset_path: str,
+    config: Dict[str, object],
+) -> Dict[str, str]:
+    """
+    Run two-stage vocabulary adaptation fine-tuning, faithful to TokAlign:
+    - Stage 1: embeddings-only warmup
+    - Stage 2: full-model continued training
+    All hyperparameters are provided via config; no hardcoded values.
+    """
+    va_root = run_dir / "vocab_adaptation"
+    stage1_dir = va_root / "stage1_embed_only"
+    stage2_dir = va_root / "stage2_full"
+    stage1_dir.mkdir(parents=True, exist_ok=True)
+    stage2_dir.mkdir(parents=True, exist_ok=True)
+
+    def _is_flash_attn_available() -> bool:
+        try:
+            import flash_attn  # type: ignore  # noqa: F401
+            return True
+        except Exception:
+            return False
+
+    # Extract config with explicit casting
+    stage1_steps = int(config.get("stage1_steps", 2500))  # type: ignore[arg-type]
+    stage2_steps = int(config.get("stage2_steps", 2500))  # type: ignore[arg-type]
+    lr_stage1 = float(config.get("lr_stage1", 6.4e-4))  # type: ignore[arg-type]
+    lr_stage2 = float(config.get("lr_stage2", 5e-5))  # type: ignore[arg-type]
+    batch_size = int(config.get("batch_size", 2))  # type: ignore[arg-type]
+    grad_acc = int(config.get("gradient_accumulation", 16))  # type: ignore[arg-type]
+    max_seq_length = int(config.get("max_seq_length", 2048))  # type: ignore[arg-type]
+    train_start_idx_stage2 = int(config.get("train_start_idx_stage2", 2560000))  # type: ignore[arg-type]
+    seed = int(config.get("seed", 0))  # type: ignore[arg-type]
+    use_flash_attn = bool(config.get("use_flash_attn", True)) and _is_flash_attn_available()
+
+    # Common argument fragments
+    def _common_args() -> list[str]:
+        args: list[str] = [
+            sys.executable,
+            "-m",
+            "src.clm_train",
+            "--tokenizer_path",
+            adapted_model_path,
+            "--dataset_name",
+            dataset_path,
+            "--max_seq_length",
+            str(max_seq_length),
+            "--per_device_train_batch_size",
+            str(batch_size),
+            "--gradient_accumulation_steps",
+            str(grad_acc),
+            "--use_gradient_checkpointing",
+            "--bf16",
+            "True",
+            "--packing",
+            "True",
+            "--lr_scheduler_type",
+            "cosine",
+            "--warmup_ratio",
+            "0.03",
+            "--weight_decay",
+            "0.01",
+            "--ignore_data_skip",
+            "True",
+            "--seed",
+            str(seed),
+        ]
+        if use_flash_attn:
+            args.extend(["--use_flash_attn", "True"])
+        return args
+
+    # Stage 1: embeddings-only
+    stage1_args = _common_args()
+    stage1_args.extend(
+        [
+            "--model_name",
+            adapted_model_path,
+            "--output_dir",
+            str(stage1_dir),
+            "--max_steps",
+            str(stage1_steps),
+            "--save_steps",
+            str(stage1_steps),
+            "--logging_steps",
+            "50",
+            "--learning_rate",
+            str(lr_stage1),
+            "--finetune_embed_only",
+            "True",
+            "--train_start_idx",
+            "0",
+        ]
+    )
+    logger.info("Starting vocabulary adaptation Stage 1 (embeddings-only) at %s.", stage1_dir)
+    _run_subprocess(stage1_args)
+
+    # Stage 2: full model
+    stage1_ckpt = stage1_dir / f"checkpoint-{stage1_steps}"
+    stage2_args = _common_args()
+    stage2_args.extend(
+        [
+            "--model_name",
+            str(stage1_ckpt),
+            "--output_dir",
+            str(stage2_dir),
+            "--max_steps",
+            str(stage2_steps),
+            "--save_steps",
+            str(stage2_steps),
+            "--logging_steps",
+            "50",
+            "--learning_rate",
+            str(lr_stage2),
+            "--train_start_idx",
+            str(train_start_idx_stage2),
+        ]
+    )
+    logger.info("Starting vocabulary adaptation Stage 2 (full-model) at %s.", stage2_dir)
+    _run_subprocess(stage2_args)
+
+    final_ckpt = stage2_dir / f"checkpoint-{stage2_steps}"
+    return {
+        "stage1_model_dir": str(stage1_dir),
+        "stage2_model_dir": str(stage2_dir),
+        "final_model_dir": str(final_ckpt),
+    }
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="TokAlign medical pipeline helper.")
     subparsers = parser.add_subparsers(dest="command", required=True)

@@ -131,9 +131,9 @@ Logs are written under `runs/logs/` and a roll-up summary can be found in
 
 You can drive the entire pipeline via YAML configs. Presets live under `configs/`:
 
-- `configs/smoke_test.yaml` — quick validation (~5MB corpus, fast settings)
+- `configs/ultra_quick_demo.yaml` — ultra-fast demo (~5MB corpus, very fast settings)
 - `configs/research.yaml` — quality-first defaults (5GB, TF-IDF, 2000 pivots)
-- `configs/production.yaml` — fixed worker/thread counts for stable throughput
+
 
 Examples:
 
