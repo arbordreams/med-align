@@ -12,8 +12,14 @@ from transformers import (
     set_seed as hf_set_seed,
 )
 from .clm_utils import *
-
-from .lr_callback import LRCallback
+try:
+    from .lr_callback import LRCallback  # optional; present in some setups
+except Exception:
+    # Fallback no-op callback so imports never fail
+    from transformers import TrainerCallback as _TrainerCallback  # type: ignore
+    class LRCallback(_TrainerCallback):  # type: ignore
+        def __init__(self, *args, **kwargs) -> None:  # noqa: D401
+            super().__init__()
 
 # Define and parse arguments.
 @dataclass
