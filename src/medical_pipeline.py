@@ -213,6 +213,8 @@ def tokenize_corpus(
             "--train_file",
             aggregated_jsonl,
             "--only_tokenize",
+            "--validation_split_percentage",
+            "0",
             "--dataset_path_in_disk",
             str(dataset_path),
             "--preprocessing_num_workers",
