@@ -91,6 +91,12 @@ class ConstantLengthDataset(IterableDataset):
                     break
                 try:
                     sample = next(iterator)[self.content_field]
+                    if len(sample) < self.seq_length:
+                        pad_id = self.concat_token_id if self.concat_token_id is not None else self.tokenizer.pad_token_id
+                        pad_id = 0 if pad_id is None else pad_id
+                        sample = sample + [pad_id] * (self.seq_length - len(sample))
+                    elif len(sample) > self.seq_length:
+                        sample = sample[: self.seq_length]
                     assert len(sample) == self.seq_length
                     buffer.append(sample)
                     buffer_len += len(buffer[-1])
@@ -138,6 +144,10 @@ class ConstantLengthDataset(IterableDataset):
             examples = []
             for i in range(0, len(all_token_ids), self.seq_length):
                 input_ids = all_token_ids[i : i + self.seq_length]
+                if len(input_ids) < self.seq_length and len(input_ids) > 0:
+                    pad_id = self.concat_token_id if self.concat_token_id is not None else self.tokenizer.pad_token_id
+                    pad_id = 0 if pad_id is None else pad_id
+                    input_ids = input_ids + [pad_id] * (self.seq_length - len(input_ids))
                 if len(input_ids) == self.seq_length:
                     examples.append(input_ids)
             if self.shuffle:
