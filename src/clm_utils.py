@@ -85,6 +85,7 @@ class ConstantLengthDataset(IterableDataset):
         iterator = iter(self.dataset)
         while True:
             buffer, buffer_len = [], 0
+            more_examples = True
 
             while True:
                 if buffer_len >= self.max_buffer_size:
@@ -107,6 +108,10 @@ class ConstantLengthDataset(IterableDataset):
                         more_examples = False
                         break
 
+            # If no more examples and nothing buffered, terminate outer loop
+            if not more_examples and not buffer:
+                break
+
             examples = buffer
             
             # if self.shuffle:
@@ -118,11 +123,15 @@ class ConstantLengthDataset(IterableDataset):
                     "input_ids": example,
                     "labels": example,
                 }
+            # After flushing the final partial buffer, exit
+            if not more_examples:
+                break
 
     def token_iter(self):
         iterator = iter(self.dataset)
         while True:
             buffer, buffer_len = [], 0
+            more_examples = True
             while True:
                 if buffer_len >= self.max_buffer_size:
                     break
@@ -135,6 +144,9 @@ class ConstantLengthDataset(IterableDataset):
                     else:
                         more_examples = False
                         break
+            # If no more examples and nothing buffered, terminate outer loop
+            if not more_examples and not buffer:
+                break
             tokenized_inputs = self.tokenizer(buffer, truncation=False)["input_ids"]
             all_token_ids = []
             for tokenized_input in tokenized_inputs:
@@ -158,6 +170,9 @@ class ConstantLengthDataset(IterableDataset):
                     "input_ids": example,
                     "labels": example,
                 }
+            # After flushing the final partial buffer, exit
+            if not more_examples:
+                break
 
     def sample_mapper(self, sample):
         return {
