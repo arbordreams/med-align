@@ -10,6 +10,7 @@ from transformers import (
     Trainer,
     EarlyStoppingCallback,
     set_seed as hf_set_seed,
+    DataCollatorForLanguageModeling,
 )
 from .clm_utils import *
 try:
@@ -312,8 +313,19 @@ def main(args):
     # datasets
     train_dataset, eval_dataset = create_datasets(tokenizer, args)
 
+    # Data collator: pad inputs and labels consistently for CLM (no MLM)
+    data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False, pad_to_multiple_of=8)
+
     # trainer
-    trainer = Trainer(model=model, tokenizer=tokenizer, args=training_arguments, train_dataset=train_dataset, eval_dataset=eval_dataset, callbacks=callbacks)
+    trainer = Trainer(
+        model=model,
+        tokenizer=tokenizer,
+        args=training_arguments,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        data_collator=data_collator,
+        callbacks=callbacks,
+    )
     # trainer.accelerator.print(f"{trainer.model}")
     if args.use_peft_lora:
         trainer.model.print_trainable_parameters()

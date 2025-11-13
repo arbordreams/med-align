@@ -99,6 +99,19 @@ def _validate_config_structure(cfg: Dict[str, Any]) -> None:
     Shallow validation to provide helpful error messages when config is malformed.
     We validate presence of top-level sections and the expected key types where practical.
     """
+    def _coerce_to_float_if_numeric_str(value: Any) -> Any:
+        """
+        Best-effort coercion used for tolerant config loading:
+        - If value is a string that represents a number (including scientific notation), return float(value).
+        - Otherwise, return the original value unchanged.
+        """
+        if isinstance(value, str):
+            stripped = value.strip()
+            try:
+                return float(stripped)
+            except (ValueError, TypeError):
+                return value
+        return value
     required_sections = [
         "models",
         "corpus",
@@ -180,6 +193,9 @@ def _validate_config_structure(cfg: Dict[str, Any]) -> None:
 
     # vocab_adaptation
     va = cfg["vocab_adaptation"]
+    # Tolerate scientific-notation strings in learning rates by coercing them to float
+    va["lr_stage1"] = _coerce_to_float_if_numeric_str(va.get("lr_stage1", 0.0))
+    va["lr_stage2"] = _coerce_to_float_if_numeric_str(va.get("lr_stage2", 0.0))
     if not isinstance(va.get("enabled", True), bool):
         raise ValueError("vocab_adaptation.enabled must be a boolean")
     if not isinstance(va.get("stage1_steps", 0), int):

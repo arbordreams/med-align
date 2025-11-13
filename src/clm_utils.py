@@ -175,10 +175,15 @@ class ConstantLengthDataset(IterableDataset):
                 break
 
     def sample_mapper(self, sample):
-        return {
-            "input_ids": sample["input_ids"],
-            "labels": sample["input_ids"],
-        }
+        # Ensure fixed-length sequences in multiprocessing workers by padding/truncating
+        seq = sample["input_ids"]
+        if len(seq) < self.seq_length:
+            pad_id = self.concat_token_id if self.concat_token_id is not None else self.tokenizer.pad_token_id
+            pad_id = 0 if pad_id is None else pad_id
+            seq = seq + [pad_id] * (self.seq_length - len(seq))
+        elif len(seq) > self.seq_length:
+            seq = seq[: self.seq_length]
+        return {"input_ids": seq, "labels": seq}
     
     def multiprocessing_iter(self):
         worker_total_num = torch.utils.data.get_worker_info().num_workers

@@ -48,8 +48,8 @@ vocab_adaptation:
   stage1_steps: 2500
   stage2_steps: 2500
   lr_stage1: 6.4e-4
-  lr_stage2: 5e-5
-  batch_size: 2
+  lr_stage2: 5.0e-5
+  batch_size: 4
   gradient_accumulation: 16
   max_seq_length: 2048
   train_start_idx_stage2: 2560000
