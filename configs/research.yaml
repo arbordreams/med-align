@@ -37,6 +37,8 @@ evaluation:
     - "uiyunkim-hub/pubmed-abstract:train"
   max_samples: 1000
   qa: true
+  baseline_model: "mistralai/Mistral-7B-v0.3"
+  pubmedqa_dataset: "auto"
 
 pipeline:
   run_root: "runs/tokenizer_adapt"

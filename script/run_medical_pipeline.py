@@ -400,24 +400,31 @@ def main() -> None:
                         max_length=eval_maxlen,
                     )
                 }
-            # Optional PubMedQA
+            # Optional PubMedQA + coverage metrics
             if bool(final_cfg["evaluation"]["qa"]) or os.getenv("MEDICAL_EVAL_QA", "") == "1":
-                qa_out = run_dir / "eval" / "pubmedqa.json"
-                os.makedirs(qa_out.parent, exist_ok=True)
+                metrics_dir = run_dir / "metrics"
+                os.makedirs(metrics_dir, exist_ok=True)
+                qa_out = metrics_dir / "pubmedqa.json"
+                medical_eval_out = metrics_dir / "medical_eval.json"
+                baseline_model = str(final_cfg["evaluation"].get("baseline_model", "mistralai/Mistral-7B-v0.3"))
+                max_qa = int(final_cfg["evaluation"]["max_samples"])
+                dataset_pref = str(final_cfg["evaluation"].get("pubmedqa_dataset", "auto"))
                 try:
                     # Evaluate baseline (base Mistral model)
                     baseline_res = eval_medical.evaluate_pubmedqa(
-                        model_path=source_model_cfg,
-                        tokenizer_path=source_tokenizer_cfg,
+                        model_path=baseline_model,
+                        tokenizer_path=baseline_model,
                         split="test",
-                        max_samples=int(os.getenv("TOKALIGN_PUBMEDQA_MAX", "200")),
+                        max_samples=max_qa,
+                        dataset_preference=dataset_pref,
                     )
                     # Evaluate adapted model
                     adapted_res = eval_medical.evaluate_pubmedqa(
                         model_path=eval_model_path,
                         tokenizer_path=eval_tokenizer,
                         split="test",
-                        max_samples=int(os.getenv("TOKALIGN_PUBMEDQA_MAX", "200")),
+                        max_samples=max_qa,
+                        dataset_preference=dataset_pref,
                     )
                     # Calculate improvement
                     improvement = {
@@ -439,6 +446,36 @@ def main() -> None:
                 except Exception as qa_exc:  # pragma: no cover
                     LOGGER.warning("PubMedQA evaluation skipped/failed: %s", qa_exc)
                     results["pubmedqa"] = {"status": "error", "message": str(qa_exc)}
+
+                # Coverage metrics (terms + alignment)
+                try:
+                    terms_path = stage_outputs.get("term_mining", {}).get("terms_path")
+                    vocab_mapping = stage_outputs.get("train_align", {}).get("vocab_mapping")
+                    coverage: Dict[str, Any] = {}
+                    if terms_path:
+                        coverage["terms_adapted"] = eval_medical.compute_term_tokenization_coverage(
+                            terms_path=terms_path,
+                            tokenizer_path=eval_tokenizer,
+                        )
+                        # Baseline tokenizer coverage for comparison
+                        coverage["terms_baseline"] = eval_medical.compute_term_tokenization_coverage(
+                            terms_path=terms_path,
+                            tokenizer_path=baseline_model,
+                        )
+                    if vocab_mapping:
+                        coverage["alignment"] = eval_medical.compute_alignment_coverage(
+                            vocab_mapping_path=vocab_mapping,
+                            target_tokenizer_path=augmented_target,
+                        )
+                    medical_eval = {
+                        "pubmedqa": results.get("pubmedqa"),
+                        "coverage": coverage,
+                    }
+                    with open(medical_eval_out, "w", encoding="utf-8") as fp:
+                        json.dump(medical_eval, fp, indent=2)
+                    results["medical_eval"] = {"results_path": str(medical_eval_out), **medical_eval}
+                except Exception as cov_exc:  # pragma: no cover
+                    LOGGER.warning("Coverage metrics skipped/failed: %s", cov_exc)
             with open(eval_output, "w", encoding="utf-8") as fp:
                 json.dump(results, fp, indent=2)
             return {

@@ -12,16 +12,15 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import List, Sequence
+from typing import List, Sequence, Dict, Any, Tuple, Optional
+import statistics as _stats
 
 import datasets
 import torch
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
 
-DEFAULT_DATASETS: List[str] = [
-    "uiyunkim-hub/pubmed-abstract:train",
-]
+DEFAULT_DATASETS: List[str] = ["uiyunkim-hub/pubmed-abstract:train"]
 
 logger = logging.getLogger(__name__)
 
@@ -276,12 +275,88 @@ def _load_model_with_fallbacks(model_path: str, tokenizer: AutoTokenizer) -> Aut
     return model
 
 
+def _try_load_pubmedqa_bigbio(split: str) -> Optional[datasets.IterableDataset]:
+    """
+    Try to load BigBio PubMedQA 'source' labeled split.
+    Returns streaming IterableDataset or None on failure.
+    """
+    try:
+        ds = datasets.load_dataset(
+            "bigbio/pubmed_qa",
+            "pubmed_qa_labeled_fold0_source",
+            split=split,
+            streaming=True,
+        )
+        logger.info("Loaded bigbio/pubmed_qa (source) split=%s (streaming).", split)
+        return ds
+    except Exception as e:
+        logger.warning("BigBio pubmed_qa source split=%s unavailable: %s", split, e)
+        try:
+            ds = datasets.load_dataset(
+                "bigbio/pubmed_qa",
+                "pubmed_qa_labeled_fold0",
+                split=split,
+                streaming=True,
+            )
+            logger.info("Loaded bigbio/pubmed_qa (fold0) split=%s (streaming).", split)
+            return ds
+        except Exception as e2:
+            logger.warning("BigBio pubmed_qa fold0 split=%s unavailable: %s", split, e2)
+    return None
+
+
+def _try_load_pubmedqa_standard(split: str) -> Tuple[datasets.IterableDataset, str]:
+    """
+    Load standard pubmed_qa with a reasonable fallback to train if requested split is missing.
+    Returns (dataset, resolved_split).
+    """
+    cfg = "pqa_labeled"
+    try:
+        ds = datasets.load_dataset("pubmed_qa", cfg, split=split, streaming=True)
+        logger.info("Loaded pubmed_qa:%s split=%s (streaming).", cfg, split)
+        return ds, split
+    except Exception as e:
+        logger.warning("pubmed_qa:%s split=%s unavailable (%s); falling back to train.", cfg, split, e)
+        ds = datasets.load_dataset("pubmed_qa", cfg, split="train", streaming=True)
+        logger.info("Loaded pubmed_qa:%s split=train (streaming).", cfg)
+        return ds, "train"
+
+
+def _extract_pubmedqa_fields(example: Dict[str, Any]) -> Tuple[str, str, str]:
+    """
+    Robust extraction for both BigBio and standard schemas.
+    Returns (question, context_text, gold_label).
+    """
+    if "QUESTION" in example:
+        question = str(example.get("QUESTION") or "")
+        contexts = example.get("CONTEXTS") or []
+        if not isinstance(contexts, list):
+            contexts = [str(contexts)]
+        ctx = " ".join([str(c) for c in contexts if isinstance(c, (str,))])
+        label = str(example.get("final_decision") or "").strip().lower()
+        return question, ctx, label
+    question = str(example.get("question") or "")
+    ctx_field = example.get("context")
+    if isinstance(ctx_field, dict):
+        ctx_list = ctx_field.get("contexts") or []
+        if not isinstance(ctx_list, list):
+            ctx_list = [str(ctx_list)]
+        ctx = " ".join([str(c) for c in ctx_list if isinstance(c, (str,))])
+    elif isinstance(ctx_field, list):
+        ctx = " ".join([str(c) for c in ctx_field])
+    else:
+        ctx = str(ctx_field or "")
+    label = str(example.get("final_decision") or "").strip().lower()
+    return question, ctx, label
+
+
 def evaluate_pubmedqa(
     *,
     model_path: str,
     tokenizer_path: str,
     split: str = "test",
     max_samples: int | None = 200,
+    dataset_preference: str = "auto",
 ) -> dict:
     """
     Zero-shot PubMedQA accuracy using conditional likelihood over {yes,no,maybe}.
@@ -299,38 +374,13 @@ def evaluate_pubmedqa(
     model = _load_model_with_fallbacks(model_path, tokenizer)
     dtype = next(model.parameters()).dtype
 
-    # Load ONLY the official PubMedQA labeled fold0 source split.
-    try:
-        ds = datasets.load_dataset(
-            "bigbio/pubmed_qa",
-            "pubmed_qa_labeled_fold0_source",
-            split=split,
-            streaming=True,
-        )
-        logger.info(
-            "Loaded dataset bigbio/pubmed_qa config=%s split=%s (streaming).",
-            "pubmed_qa_labeled_fold0_source",
-            split,
-        )
-    except Exception:
-        # Fallback to commonly available labeled fold0 config without the _source suffix.
-        try:
-            ds = datasets.load_dataset(
-                "bigbio/pubmed_qa",
-                "pubmed_qa_labeled_fold0",
-                split=split,
-                streaming=True,
-            )
-            logger.info(
-                "Loaded dataset bigbio/pubmed_qa config=%s split=%s (streaming).",
-                "pubmed_qa_labeled_fold0",
-                split,
-            )
-        except Exception as e:
-            raise RuntimeError(
-                f"Failed to load bigbio/pubmed_qa configs 'pubmed_qa_labeled_fold0_source' and 'pubmed_qa_labeled_fold0' "
-                f"for split '{split}'. Ensure the dataset/config/split exist."
-            ) from e
+    # Preferred BigBio; fallback to standard train split if BigBio unavailable in this environment.
+    ds: Optional[datasets.IterableDataset] = None
+    resolved_split = split
+    if dataset_preference in ("auto", "bigbio"):
+        ds = _try_load_pubmedqa_bigbio(split)
+    if ds is None:
+        ds, resolved_split = _try_load_pubmedqa_standard(split)
     labels = ["yes", "no", "maybe"]
     correct = 0
     total = 0
@@ -348,27 +398,10 @@ def evaluate_pubmedqa(
             out = model(input_ids=enc_full["input_ids"].to("cuda"), labels=labels_ids.unsqueeze(0).to("cuda"))
         return -float(out.loss.detach().cpu())
 
-    for example in ds:
+    for example in ds:  # type: ignore[union-attr]
         if max_samples and total >= max_samples:
             break
-        # bigbio/pubmed_qa 'source' schema field names (upper-case)
-        # QUESTION: str, CONTEXTS: List[str], final_decision: str in {"yes","no","maybe"}
-        try:
-            question = example["QUESTION"]
-            contexts_list = example["CONTEXTS"]
-            label = str(example["final_decision"]).strip().lower()
-        except KeyError:
-            # Malformed record; skip
-            continue
-
-        if not isinstance(contexts_list, list):
-            contexts_list = [str(contexts_list)]
-        ctx = " ".join([c for c in contexts_list if isinstance(c, str)])
-
-        # Validate label
-        if label not in labels:
-            continue
-            
+        question, ctx, label = _extract_pubmedqa_fields(example)
         if label not in labels or not question:
             continue
         prompt = f"Question: {question}\nContext: {ctx}\nAnswer:" if ctx else f"Question: {question}\nAnswer:"
@@ -380,7 +413,84 @@ def evaluate_pubmedqa(
             correct += 1
             per_class[label]["correct"] += 1
     acc = float(correct) / total if total else float("nan")
-    return {"accuracy": acc, "total": total, "per_class": {k: {"accuracy": (v["correct"] / v["total"]) if v["total"] else float("nan"), "total": v["total"]} for k, v in per_class.items()}}
+    return {
+        "accuracy": acc,
+        "total": total,
+        "split": resolved_split,
+        "per_class": {
+            k: {
+                "accuracy": (v["correct"] / v["total"]) if v["total"] else float("nan"),
+                "total": v["total"],
+            }
+            for k, v in per_class.items()
+        },
+    }
+
+
+def compute_term_tokenization_coverage(terms_path: str, tokenizer_path: str) -> Dict[str, Any]:
+    """
+    Compute tokenization coverage for mined medical terms.
+    """
+    tok = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+    if tok.pad_token is None:
+        tok.pad_token = tok.eos_token
+    lengths: List[int] = []
+    total = 0
+    with open(terms_path, "r", encoding="utf-8") as fp:
+        for line in fp:
+            term = line.strip()
+            if not term:
+                continue
+            ids = tok(term, add_special_tokens=False)["input_ids"]
+            piece_len = len(ids) if isinstance(ids, list) else int(ids.shape[-1])
+            lengths.append(piece_len)
+            total += 1
+    if not total:
+        return {
+            "total_terms": 0,
+            "single_token_ratio": float("nan"),
+            "mean_tokens_per_term": float("nan"),
+            "median_tokens_per_term": float("nan"),
+            "p95_tokens_per_term": float("nan"),
+        }
+    single = sum(1 for l in lengths if l == 1)
+    return {
+        "total_terms": total,
+        "single_token_ratio": single / total,
+        "mean_tokens_per_term": float(_stats.mean(lengths)),
+        "median_tokens_per_term": float(_stats.median(lengths)),
+        "p95_tokens_per_term": float(_stats.quantiles(lengths, n=20)[-1]) if len(lengths) >= 20 else max(lengths),
+    }
+
+
+def compute_alignment_coverage(
+    *,
+    vocab_mapping_path: str,
+    target_tokenizer_path: str,
+) -> Dict[str, Any]:
+    """
+    Estimate alignment coverage using vocab_mapping.json (target→source coverage).
+    """
+    tok = AutoTokenizer.from_pretrained(target_tokenizer_path, trust_remote_code=True)
+    target_vocab = int(getattr(tok, "vocab_size", None) or len(tok))
+    mapped = 0
+    try:
+        with open(vocab_mapping_path, "r", encoding="utf-8") as fp:
+            data = json.load(fp)
+        if isinstance(data, dict):
+            if "mapping" in data and isinstance(data["mapping"], dict):
+                mapped = len([k for k, v in data["mapping"].items() if v is not None])
+            elif "target_to_source" in data and isinstance(data["target_to_source"], dict):
+                mapped = len([k for k, v in data["target_to_source"].items() if v is not None])
+            else:
+                mapped = len([k for k, v in data.items() if str(k).isdigit() and v is not None])
+        elif isinstance(data, list):
+            mapped = len(data)
+    except Exception as e:
+        logger.warning("Failed to parse vocab_mapping.json (%s); alignment coverage unknown.", e)
+        return {"target_vocab": target_vocab, "mapped": None, "coverage": None}
+    coverage = mapped / target_vocab if target_vocab > 0 else None
+    return {"target_vocab": target_vocab, "mapped": mapped, "coverage": coverage}
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate medical TokAlign models.")
@@ -392,6 +502,7 @@ def parse_args() -> argparse.Namespace:
         help="Hugging Face dataset name (optionally dataset:split). Can be supplied multiple times.",
     )
     parser.add_argument("--output", required=True, help="Path to JSON file with evaluation results.")
+    # Perplexity/general knobs
     parser.add_argument(
         "--max-samples",
         type=int,
@@ -409,6 +520,23 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1024,
         help="Maximum sequence length for tokenization.",
+    )
+    # PubMedQA options
+    parser.add_argument(
+        "--run-pubmedqa",
+        action="store_true",
+        help="Run PubMedQA accuracy in addition to perplexity.",
+    )
+    parser.add_argument(
+        "--baseline-model",
+        default="mistralai/Mistral-7B-v0.3",
+        help="Baseline model for PubMedQA (only used if --run-pubmedqa).",
+    )
+    parser.add_argument(
+        "--pubmedqa-dataset",
+        default="auto",
+        choices=["auto", "bigbio", "standard"],
+        help="Dataset preference for PubMedQA.",
     )
     parser.add_argument(
         "--log-missing",
@@ -449,7 +577,7 @@ def main() -> None:
             logger.warning(placeholder["message"])
         return
 
-    results = {}
+    results: Dict[str, Any] = {}
     for dataset_item in datasets_to_evaluate:
         if ":" in dataset_item:
             dataset_name, split = dataset_item.split(":", maxsplit=1)
@@ -467,11 +595,34 @@ def main() -> None:
         )
         results[f"{dataset_name}:{split}"] = {"perplexity": perplexity}
 
+    if args.run_pubmedqa:
+        try:
+            baseline = evaluate_pubmedqa(
+                model_path=args.baseline_model,
+                tokenizer_path=args.baseline_model,
+                split="test",
+                max_samples=None if args.max_samples <= 0 else args.max_samples,
+                dataset_preference=args.pubmedqa_dataset,
+            )
+            adapted = evaluate_pubmedqa(
+                model_path=args.model,
+                tokenizer_path=args.tokenizer,
+                split="test",
+                max_samples=None if args.max_samples <= 0 else args.max_samples,
+                dataset_preference=args.pubmedqa_dataset,
+            )
+            results["pubmedqa"] = {
+                "baseline": baseline,
+                "adapted": adapted,
+                "delta": {"accuracy": adapted["accuracy"] - baseline["accuracy"]},
+            }
+        except Exception as qa_exc:
+            logger.warning("PubMedQA evaluation failed: %s", qa_exc)
+            results["pubmedqa"] = {"status": "error", "message": str(qa_exc)}
+
     with open(args.output, "w", encoding="utf-8") as fp:
         json.dump(results, fp, indent=2)
     logger.info("Evaluation results written to %s.", args.output)
-    # Work around rare shutdown crashes from mixed backends by exiting without Python teardown.
-    os._exit(0)
 
 
 if __name__ == "__main__":

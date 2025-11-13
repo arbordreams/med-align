@@ -282,6 +282,23 @@ python src/eval_medical.py \
   --output runs/tokenizer_adapt/<timestamp>/evaluation.json
 ```
 
+PubMedQA accuracy and coverage metrics:
+
+- The evaluator will try BigBio PubMedQA test first and fall back to `pubmed_qa:pqa_labeled:train` (streaming) if the test split is unavailable.
+- Results compare the adapted model against the baseline Mistral-7B-v0.3 by default and include tokenization and alignment coverage metrics.
+
+```
+python -m src.eval_medical \
+  --model runs/tokenizer_adapt/<timestamp>/vocab_adaptation/stage2_full/checkpoint-<steps> \
+  --tokenizer runs/tokenizer_adapt/<timestamp>/vocab_adaptation/stage2_full/checkpoint-<steps> \
+  --dataset uiyunkim-hub/pubmed-abstract:train \
+  --max-samples 1000 \
+  --run-pubmedqa \
+  --baseline-model mistralai/Mistral-7B-v0.3 \
+  --pubmedqa-dataset auto \
+  --output runs/tokenizer_adapt/<timestamp>/metrics/medical_eval.json
+```
+
 ### Expected gains with medical alignment
 
 By mining domain-specific terminology and mirroring the corpus across both

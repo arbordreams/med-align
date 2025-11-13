@@ -71,6 +71,8 @@ def get_default_config() -> Dict[str, Any]:
             "datasets": [],
             "max_samples": 128,
             "qa": False,
+            "baseline_model": "mistralai/Mistral-7B-v0.3",
+            "pubmedqa_dataset": "auto",
         },
         "pipeline": {
             "run_root": "runs/tokenizer_adapt",
@@ -183,6 +185,10 @@ def _validate_config_structure(cfg: Dict[str, Any]) -> None:
         raise ValueError("evaluation.max_samples must be an integer")
     if not isinstance(cfg["evaluation"].get("qa", False), bool):
         raise ValueError("evaluation.qa must be a boolean")
+    if not isinstance(cfg["evaluation"].get("baseline_model", ""), str):
+        raise ValueError("evaluation.baseline_model must be a string")
+    if cfg["evaluation"].get("pubmedqa_dataset", "auto") not in ("auto", "bigbio", "standard"):
+        raise ValueError("evaluation.pubmedqa_dataset must be one of: auto, bigbio, standard")
 
     if not isinstance(cfg["pipeline"].get("run_root", ""), str):
         raise ValueError("pipeline.run_root must be a string")
