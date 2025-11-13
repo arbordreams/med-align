@@ -554,6 +554,9 @@ def vocab_adaptation(
             args.extend(["--use_flash_attn", "True"])
         return args
 
+    # Environment for GPU training
+    cuda_env = {"CUDA_VISIBLE_DEVICES": "0"} if torch.cuda.is_available() else {}
+
     # Stage 1: embeddings-only
     stage1_args = _common_args()
     stage1_args.extend(
@@ -577,7 +580,7 @@ def vocab_adaptation(
         ]
     )
     logger.info("Starting vocabulary adaptation Stage 1 (embeddings-only) at %s.", stage1_dir)
-    _run_subprocess(stage1_args)
+    _run_subprocess(stage1_args, env=cuda_env)
 
     # Stage 2: full model
     stage1_ckpt = stage1_dir / f"checkpoint-{stage1_steps}"
@@ -601,7 +604,7 @@ def vocab_adaptation(
         ]
     )
     logger.info("Starting vocabulary adaptation Stage 2 (full-model) at %s.", stage2_dir)
-    _run_subprocess(stage2_args)
+    _run_subprocess(stage2_args, env=cuda_env)
 
     final_ckpt = stage2_dir / f"checkpoint-{stage2_steps}"
     return {
