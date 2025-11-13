@@ -548,8 +548,15 @@ def vocab_adaptation(
             args.extend(["--use_flash_attn", "True"])
         return args
 
-    # Environment for GPU training
-    cuda_env = {"CUDA_VISIBLE_DEVICES": "0"} if torch.cuda.is_available() else {}
+    # Environment for GPU training: respect user CUDA selection if already set
+    cuda_env: Dict[str, str] = {}
+    try:
+        import os as _os_env  # local alias to avoid top-level shadowing
+        if torch.cuda.is_available() and not _os_env.environ.get("CUDA_VISIBLE_DEVICES"):
+            # Default to first device on single-GPU GH200 nodes; do not override if user set it.
+            cuda_env["CUDA_VISIBLE_DEVICES"] = "0"
+    except Exception:
+        pass
 
     # Stage 1: embeddings-only
     stage1_args = _common_args()
