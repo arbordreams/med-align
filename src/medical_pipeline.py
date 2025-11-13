@@ -507,16 +507,7 @@ def vocab_adaptation(
     seed = int(config.get("seed", 0))  # type: ignore[arg-type]
     use_flash_attn = bool(config.get("use_flash_attn", True)) and _is_flash_attn_available()
 
-    # Check GPU availability (vocab adaptation requires GPU for 7B models)
-    try:
-        import torch
-        has_gpu = torch.cuda.is_available()
-    except Exception:
-        has_gpu = False
-
-    if not has_gpu:
-        logger.warning("Vocabulary adaptation skipped: CUDA/GPU not available (CPU-only training of 7B model is impractical).")
-        return {"skipped": "no_gpu", "model_dir": adapted_model_path}
+    # Proceed without explicit GPU gate; environment is expected to provide GPU.
 
     # Common argument fragments
     def _common_args() -> list[str]:

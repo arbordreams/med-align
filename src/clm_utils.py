@@ -277,7 +277,7 @@ def create_and_prepare_model(args):
             attn_impl = None
     else:
         attn_impl = None
-    device_map = None
+    device_map = "auto"
     bnb_config = None
     load_in_8bit = args.use_8bit_qunatization
 
@@ -298,8 +298,7 @@ def create_and_prepare_model(args):
                 print("Your GPU supports bfloat16, you can accelerate training with the argument --bf16")
                 print("=" * 80)
 
-    if args.use_4bit_qunatization or args.use_8bit_qunatization:
-        device_map = "auto"  # {"": 0}
+    # Always use device_map='auto' to ensure proper GPU placement even without quantization.
 
     torch_dtype = torch.bfloat16 if args.bf16 else torch.float32
 

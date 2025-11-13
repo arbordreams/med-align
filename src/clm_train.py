@@ -257,7 +257,7 @@ def main(args):
         eval_steps=args.eval_steps,
         save_steps=args.save_steps,
         logging_steps=args.logging_steps,
-        torch_compile=True,
+        torch_compile=False,
         dataloader_num_workers=args.num_workers,
         push_to_hub=args.push_to_hub,
         save_on_each_node=args.save_on_each_node,
