@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import yaml
 import os
 import sys
 import time
@@ -31,6 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 from src import medical_corpus, medical_pipeline, medical_terms  # type: ignore
+from src import config_loader  # type: ignore
 
 LOGGER = logging.getLogger("medical_runner")
 
@@ -82,10 +84,12 @@ def _retry(stage_name: str, max_retries: int, backoff: float, fn: Callable[[], D
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the medical TokAlign pipeline end-to-end.")
+    parser.add_argument("--config", help="Path to YAML config. CLI overrides config. If omitted with --research-mode, loads configs/research.yaml.")
+    parser.add_argument("--show-config", action="store_true", help="Print the final merged config and exit.")
     parser.add_argument("--input", action="append", required=True, help="Medical corpus JSONL shard or directory.")
-    parser.add_argument("--source-tokenizer", default="BioMistral/BioMistral-7B", help="Source tokenizer/model identifier.")
-    parser.add_argument("--target-tokenizer", default="mistralai/Mistral-7B-v0.3", help="Target tokenizer/model identifier.")
-    parser.add_argument("--source-model", default="BioMistral/BioMistral-7B", help="Base model checkpoint for alignment.")
+    parser.add_argument("--source-tokenizer", help="Source tokenizer/model identifier.")
+    parser.add_argument("--target-tokenizer", help="Target tokenizer/model identifier.")
+    parser.add_argument("--source-model", help="Base model checkpoint for alignment.")
     parser.add_argument(
         "--source-model-fallback",
         help="Fallback model path if augmented source tokenizer lacks config (default: use --source-model).",
@@ -94,45 +98,42 @@ def parse_args() -> argparse.Namespace:
         "--target-model-fallback",
         help="Fallback model path if augmented target tokenizer lacks config (default: use --target-tokenizer).",
     )
-    parser.add_argument("--run-root", default="runs/tokenizer_adapt", help="Root directory for run artefacts.")
+    parser.add_argument("--run-root", help="Root directory for run artefacts.")
     parser.add_argument("--run-id", help="Optional run ID (timestamp used if omitted).")
-    parser.add_argument("--byte-budget", type=int, default=0, help="Maximum bytes to ingest (0 = unlimited).")
+    parser.add_argument("--byte-budget", type=int, help="Maximum bytes to ingest (0 = unlimited).")
     parser.add_argument(
         "--corpus-size-gb",
         type=float,
-        default=1.0,
         help="Target corpus size in GB. Research mode defaults to 5GB for better coverage.",
     )
     parser.add_argument("--no-dedup", action="store_true", help="Disable deduplication during ingestion.")
-    parser.add_argument("--hash-name", default="sha256", help="Hash algorithm for deduplication.")
-    parser.add_argument("--min-term-frequency", type=int, default=5, help="Minimum term frequency.")
-    parser.add_argument("--term-top-k", type=int, default=500, help="Number of terms to keep.")
+    parser.add_argument("--hash-name", help="Hash algorithm for deduplication.")
+    parser.add_argument("--min-term-frequency", type=int, help="Minimum term frequency.")
+    parser.add_argument("--term-top-k", type=int, help="Number of terms to keep.")
     parser.add_argument("--use-tfidf", action="store_true", help="Use TF-IDF weighting when mining terms.")
     parser.add_argument(
         "--embedding-backend",
         choices=["glove", "fasttext"],
-        default="fasttext",
         help="Embedding backend (FastText relies on the prebuilt fasttext-wheel package).",
     )
-    parser.add_argument("--pivot-count", type=int, default=300, help="Number of pivot tokens during alignment.")
-    parser.add_argument("--tokenizer-workers", type=int, default=8, help="Number of preprocessing workers.")
+    parser.add_argument("--pivot-count", type=int, help="Number of pivot tokens during alignment.")
+    parser.add_argument("--tokenizer-workers", type=int, help="Number of preprocessing workers.")
     parser.add_argument("--tokenizer-cache", help="Cache directory passed to Hugging Face dataset loader.")
     parser.add_argument("--evaluation-dataset", action="append", help="Optional HF dataset names for evaluation.")
-    parser.add_argument("--max-eval-samples", type=int, default=128, help="Samples evaluated per dataset.")
+    parser.add_argument("--max-eval-samples", type=int, help="Samples evaluated per dataset.")
     # Research-mode and embedding training knobs
     parser.add_argument("--research-mode", action="store_true", help="Enable quality-first research configuration.")
-    parser.add_argument("--fasttext-epochs", type=int, default=5, help="FastText training epochs.")
-    parser.add_argument("--fasttext-mincount", type=int, default=5, help="FastText minimum frequency threshold.")
-    parser.add_argument("--fasttext-lr", type=float, default=0.05, help="FastText learning rate.")
-    parser.add_argument("--fasttext-thread", type=int, default=8, help="FastText CPU threads (embedding training).")
+    parser.add_argument("--fasttext-epochs", type=int, help="FastText training epochs.")
+    parser.add_argument("--fasttext-mincount", type=int, help="FastText minimum frequency threshold.")
+    parser.add_argument("--fasttext-lr", type=float, help="FastText learning rate.")
+    parser.add_argument("--fasttext-thread", type=int, help="FastText CPU threads (embedding training).")
     parser.add_argument(
         "--similarity-threshold",
         type=float,
-        default=0.3,
         help="Minimum similarity score to accept alignment (0.0-1.0). Lower scores use fallback.",
     )
-    parser.add_argument("--max-retries", type=int, default=1, help="Retries per stage.")
-    parser.add_argument("--retry-backoff", type=float, default=5.0, help="Initial backoff (seconds).")
+    parser.add_argument("--max-retries", type=int, help="Retries per stage.")
+    parser.add_argument("--retry-backoff", type=float, help="Initial backoff (seconds).")
     parser.add_argument("--evaluate", action="store_true", help="Run evaluation stage when set.")
     parser.add_argument("--qa", action="store_true", help="Run PubMedQA evaluation during the evaluation stage.")
     parser.add_argument(
@@ -149,54 +150,54 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    run_dir = medical_pipeline.create_run_dir(Path(args.run_root), args.run_id)
+    # Load configuration (preset if --research-mode without --config), then apply CLI overrides
+    if args.config:
+        base_cfg, cfg_path = config_loader.load_config(args.config)
+        config_origin = f"Loaded configuration from {cfg_path}"
+    elif args.research_mode:
+        preset = REPO_ROOT / "configs" / "research.yaml"
+        base_cfg, cfg_path = config_loader.load_config(str(preset))
+        config_origin = f"Loaded research preset configuration from {preset}"
+    else:
+        base_cfg, cfg_path = config_loader.load_config(None)
+        config_origin = "Loaded default configuration (no config file provided)."
+
+    final_cfg = config_loader.merge_config_with_args(base_cfg, args)
+    # Derive byte budget when not set (>0)
+    if int(final_cfg["corpus"].get("byte_budget", 0)) <= 0 and float(final_cfg["corpus"].get("size_gb", 0)) > 0:
+        final_cfg["corpus"]["byte_budget"] = int(float(final_cfg["corpus"]["size_gb"]) * 1_073_741_824)
+
+    # Auto-scale workers/thread when explicitly null in config
+    if final_cfg["tokenization"].get("workers", None) is None:
+        try:
+            num_vcpus = int(os.environ.get("OMP_NUM_THREADS", "24"))
+            optimal_workers = int(num_vcpus * 3 / 4) if num_vcpus >= 48 else num_vcpus
+            optimal_workers = min(optimal_workers, 64)
+            final_cfg["tokenization"]["workers"] = max(optimal_workers, 24) if args.research_mode else max(optimal_workers, 8)
+        except (ValueError, TypeError):
+            final_cfg["tokenization"]["workers"] = 24 if args.research_mode else 8
+    if final_cfg["embedding"]["fasttext"].get("thread", None) is None:
+        try:
+            num_vcpus = int(os.environ.get("OMP_NUM_THREADS", "24"))
+            final_cfg["embedding"]["fasttext"]["thread"] = max(int(num_vcpus / 2), 8)
+        except (ValueError, TypeError):
+            final_cfg["embedding"]["fasttext"]["thread"] = 12 if args.research_mode else 8
+
+    run_dir = medical_pipeline.create_run_dir(Path(final_cfg["pipeline"]["run_root"]), args.run_id)
     _setup_logging(run_dir)
+    LOGGER.info(config_origin)
+    # Archive merged config
+    config_loader.save_config(final_cfg, run_dir / "config.yaml")
+    LOGGER.info("Final configuration archived at %s", run_dir / "config.yaml")
+    if args.show_config:
+        print(yaml.safe_dump(final_cfg, sort_keys=False))
+        return
 
-    # Apply research-grade overrides when requested. These favor quality over speed.
-    if args.research_mode:
-        LOGGER.info("Research mode enabled: applying quality-first defaults for a larger corpus.")
-        # Corpus scale - prefer CLI corpus size, default to 5 GiB in research mode
-        target_gb = args.corpus_size_gb if args.corpus_size_gb > 1.0 else 5.0
-        args.byte_budget = int(target_gb * 1_073_741_824)
-        # Term mining
-        args.term_top_k = 2000
-        args.min_term_frequency = 3
-        args.use_tfidf = True
-        # Tokenization throughput: auto-scale based on available CPU if not explicitly set
-        # If user didn't set tokenizer_workers, try to detect from environment or use reasonable default
-        if args.tokenizer_workers == 8:  # Default value from argparse
-            # Try to detect from environment or use a reasonable default
-            import os
-            try:
-                num_vcpus = int(os.environ.get("OMP_NUM_THREADS", "24"))
-                # For systems with many vCPUs (>=48): use 75% (optimal for I/O)
-                # For smaller systems (<48): use 100% (use all available)
-                if num_vcpus >= 48:
-                    optimal_workers = int(num_vcpus * 3 / 4)
-                else:
-                    optimal_workers = num_vcpus
-                # Cap at 64 workers (diminishing returns beyond this)
-                optimal_workers = min(optimal_workers, 64)
-                args.tokenizer_workers = max(optimal_workers, 24)  # Minimum 24 for research mode
-            except (ValueError, TypeError):
-                args.tokenizer_workers = 24  # Fallback to safe default
-        else:
-            # User explicitly set tokenizer_workers, but ensure minimum for research mode
-            args.tokenizer_workers = max(args.tokenizer_workers, 24)
-        # Alignment quality
-        args.pivot_count = max(args.pivot_count, 2000)
-        # Evaluation breadth
-        args.max_eval_samples = max(args.max_eval_samples, 1000)
-        # FastText training (embedding quality)
-        args.fasttext_epochs = max(args.fasttext_epochs, 30)
-        args.fasttext_mincount = 1
-        args.fasttext_lr = args.fasttext_lr if args.fasttext_lr > 0 else 0.05
-        # For 24 vCPUs with 2 workers: 12 threads per worker = 24 total
-        # Do not force 24; keep user/research-script setting when provided
-        args.fasttext_thread = max(args.fasttext_thread, 12)
-
-    source_model_fallback = args.source_model_fallback or args.source_model
-    target_model_fallback = args.target_model_fallback or args.target_tokenizer
+    source_tokenizer_cfg = str(final_cfg["models"]["source_tokenizer"])
+    target_tokenizer_cfg = str(final_cfg["models"]["target_tokenizer"])
+    source_model_cfg = str(final_cfg["models"]["source_model"])
+    source_model_fallback = args.source_model_fallback or source_model_cfg
+    target_model_fallback = args.target_model_fallback or target_tokenizer_cfg
 
     LOGGER.info("Run directory: %s", run_dir)
 
@@ -204,14 +205,14 @@ def main() -> None:
 
     stage_outputs["data_prep"] = _retry(
         "aggregate_corpus",
-        args.max_retries,
-        args.retry_backoff,
+        final_cfg["pipeline"]["max_retries"],
+        final_cfg["pipeline"]["retry_backoff"],
         lambda: medical_pipeline.data_prep(
             corpus_inputs=args.input,
             run_dir=run_dir,
-            byte_budget=None if args.byte_budget <= 0 else args.byte_budget,
-            deduplicate=not args.no_dedup,
-            hash_name=args.hash_name,
+            byte_budget=None if int(final_cfg["corpus"]["byte_budget"]) <= 0 else int(final_cfg["corpus"]["byte_budget"]),
+            deduplicate=bool(final_cfg["corpus"]["deduplicate"]),
+            hash_name=str(final_cfg["corpus"]["hash_name"]),
         ),
     )
 
@@ -220,9 +221,9 @@ def main() -> None:
     def _mine_terms() -> Dict[str, str]:
         terms = medical_terms.mine_terms(
             corpus_path=aggregated_jsonl,
-            top_k=args.term_top_k,
-            min_count=args.min_term_frequency,
-            use_tfidf=args.use_tfidf,
+            top_k=int(final_cfg["term_mining"]["top_k"]),
+            min_count=int(final_cfg["term_mining"]["min_frequency"]),
+            use_tfidf=bool(final_cfg["term_mining"]["use_tfidf"]),
         )
         terms_path = run_dir / "corpus" / "medical_terms.txt"
         with open(terms_path, "w", encoding="utf-8") as fp:
@@ -234,12 +235,12 @@ def main() -> None:
         source_aug_dir = augmented_dir / "source"
         target_aug_dir = augmented_dir / "target"
         added_source, skipped_source = medical_terms.augment_tokenizer(
-            tokenizer_path=args.source_tokenizer,
+            tokenizer_path=source_tokenizer_cfg,
             terms=terms,
             output_dir=str(source_aug_dir),
         )
         added_target, skipped_target = medical_terms.augment_tokenizer(
-            tokenizer_path=args.target_tokenizer,
+            tokenizer_path=target_tokenizer_cfg,
             terms=terms,
             output_dir=str(target_aug_dir),
         )
@@ -260,8 +261,8 @@ def main() -> None:
 
     stage_outputs["term_mining"] = _retry(
         "mine_terms_and_augment_tokenizers",
-        args.max_retries,
-        args.retry_backoff,
+        final_cfg["pipeline"]["max_retries"],
+        final_cfg["pipeline"]["retry_backoff"],
         _mine_terms,
     )
 
@@ -270,8 +271,8 @@ def main() -> None:
 
     stage_outputs["tokenize"] = _retry(
         "tokenize_and_extract",
-        args.max_retries,
-        args.retry_backoff,
+        final_cfg["pipeline"]["max_retries"],
+        final_cfg["pipeline"]["retry_backoff"],
         lambda: medical_pipeline.tokenize_corpus(
             run_dir=run_dir,
             aggregated_jsonl=aggregated_jsonl,
@@ -279,28 +280,29 @@ def main() -> None:
             tokenizer_target=augmented_target,
             source_model_fallback=source_model_fallback,
             target_model_fallback=target_model_fallback,
-            tokenizer_workers=args.tokenizer_workers,
-            tokenizer_cache_dir=args.tokenizer_cache,
+            tokenizer_workers=int(final_cfg["tokenization"]["workers"]),
+            tokenizer_cache_dir=final_cfg["tokenization"]["cache_dir"],
+            min_line_length=int(final_cfg["tokenization"]["min_line_length"]),
         ),
     )
 
     stage_outputs["train_align"] = _retry(
         "train_embeddings_and_align",
-        args.max_retries,
-        args.retry_backoff,
+        final_cfg["pipeline"]["max_retries"],
+        final_cfg["pipeline"]["retry_backoff"],
         lambda: medical_pipeline.train_embeddings_and_align(
             run_dir=run_dir,
             source_glove_path=stage_outputs["tokenize"]["source_glove"],
             target_glove_path=stage_outputs["tokenize"]["target_glove"],
             tokenizer_source=augmented_source,
             tokenizer_target=augmented_target,
-            embedding_backend=args.embedding_backend,
-            pivot_count=args.pivot_count,
-            fasttext_epochs=args.fasttext_epochs,
-            fasttext_mincount=args.fasttext_mincount,
-            fasttext_lr=args.fasttext_lr,
-            thread=args.fasttext_thread,
-            similarity_threshold=args.similarity_threshold,
+            embedding_backend=str(final_cfg["embedding"]["backend"]),
+            pivot_count=int(final_cfg["alignment"]["pivot_count"]),
+            fasttext_epochs=int(final_cfg["embedding"]["fasttext"]["epochs"]),
+            fasttext_mincount=int(final_cfg["embedding"]["fasttext"]["mincount"]),
+            fasttext_lr=float(final_cfg["embedding"]["fasttext"]["lr"]),
+            thread=int(final_cfg["embedding"]["fasttext"]["thread"]),
+            similarity_threshold=float(final_cfg["alignment"]["similarity_threshold"]),
         ),
     )
 
@@ -317,19 +319,21 @@ def main() -> None:
         LOGGER.warning("Matrix BLEU evaluation skipped/failed: %s", _bleu_exc)
     stage_outputs["apply"] = _retry(
         "apply_alignment",
-        args.max_retries,
-        args.retry_backoff,
+        final_cfg["pipeline"]["max_retries"],
+        final_cfg["pipeline"]["retry_backoff"],
         lambda: {
             "model_dir": medical_pipeline.apply_alignment(
                 run_dir=run_dir,
                 align_matrix=stage_outputs["train_align"]["align_matrix"],
-                source_model=args.source_model,
+                source_model=source_model_cfg,
                 target_tokenizer=augmented_target,
             )
         },
     )
 
-    if args.evaluate and not args.skip_eval and args.evaluation_dataset:
+    eval_enabled = bool(final_cfg["evaluation"]["enabled"]) and not args.skip_eval
+    eval_datasets = list(final_cfg["evaluation"]["datasets"] or [])
+    if eval_enabled and eval_datasets:
         from src import eval_medical
 
         eval_output = run_dir / "evaluation.json"
@@ -340,7 +344,7 @@ def main() -> None:
             # Read recommended knobs from environment to avoid expanding CLI surface.
             eval_batch = int(os.getenv("TOKALIGN_EVAL_BATCH", "32"))
             eval_maxlen = int(os.getenv("TOKALIGN_EVAL_MAXLEN", "1024"))
-            for dataset_item in args.evaluation_dataset:
+            for dataset_item in eval_datasets:
                 if ":" in dataset_item:
                     dataset_name, split = dataset_item.split(":", maxsplit=1)
                 else:
@@ -352,20 +356,20 @@ def main() -> None:
                         tokenizer_path=eval_tokenizer,
                         dataset_name=dataset_name,
                         split=split,
-                        max_samples=None if args.max_eval_samples <= 0 else args.max_eval_samples,
+                        max_samples=None if int(final_cfg["evaluation"]["max_samples"]) <= 0 else int(final_cfg["evaluation"]["max_samples"]),
                         batch_size=eval_batch,
                         max_length=eval_maxlen,
                     )
                 }
             # Optional PubMedQA
-            if args.qa or os.getenv("MEDICAL_EVAL_QA", "") == "1":
+            if bool(final_cfg["evaluation"]["qa"]) or os.getenv("MEDICAL_EVAL_QA", "") == "1":
                 qa_out = run_dir / "eval" / "pubmedqa.json"
                 os.makedirs(qa_out.parent, exist_ok=True)
                 try:
                     # Evaluate baseline (base Mistral model)
                     baseline_res = eval_medical.evaluate_pubmedqa(
-                        model_path=args.source_model,
-                        tokenizer_path=args.source_tokenizer,
+                        model_path=source_model_cfg,
+                        tokenizer_path=source_tokenizer_cfg,
                         split="test",
                         max_samples=int(os.getenv("TOKALIGN_PUBMEDQA_MAX", "200")),
                     )
@@ -407,8 +411,8 @@ def main() -> None:
 
         stage_outputs["evaluation"] = _retry(
             "evaluation",
-            args.max_retries,
-            args.retry_backoff,
+            final_cfg["pipeline"]["max_retries"],
+            final_cfg["pipeline"]["retry_backoff"],
             _run_evaluation,
         )
 

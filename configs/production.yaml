@@ -1,0 +1,46 @@
+models:
+  source_tokenizer: "BioMistral/BioMistral-7B"
+  target_tokenizer: "mistralai/Mistral-7B-v0.3"
+  source_model: "BioMistral/BioMistral-7B"
+
+corpus:
+  size_gb: 5.0
+  byte_budget: 0
+  deduplicate: true
+  hash_name: "sha256"
+
+term_mining:
+  top_k: 2000
+  min_frequency: 3
+  use_tfidf: true
+
+embedding:
+  backend: "fasttext"
+  fasttext:
+    epochs: 30
+    mincount: 1
+    lr: 0.05
+    thread: 16   # fixed threads for deterministic throughput
+
+alignment:
+  pivot_count: 2000
+  similarity_threshold: 0.3
+
+tokenization:
+  workers: 32    # fixed workers for predictable resource use
+  cache_dir: null
+  min_line_length: 0
+
+evaluation:
+  enabled: true
+  datasets:
+    - "uiyunkim-hub/pubmed-abstract:train"
+  max_samples: 1000
+  qa: true
+
+pipeline:
+  run_root: "runs/tokenizer_adapt"
+  max_retries: 1
+  retry_backoff: 5.0
+
+

@@ -127,6 +127,41 @@ python script/run_medical_pipeline.py \
 Logs are written under `runs/logs/` and a roll-up summary can be found in
 `runs/tokenizer_adapt/<timestamp>/pipeline_summary.json`.
 
+### Configuration (YAML presets)
+
+You can drive the entire pipeline via YAML configs. Presets live under `configs/`:
+
+- `configs/smoke_test.yaml` — quick validation (~5MB corpus, fast settings)
+- `configs/research.yaml` — quality-first defaults (5GB, TF-IDF, 2000 pivots)
+- `configs/production.yaml` — fixed worker/thread counts for stable throughput
+
+Examples:
+
+```
+# Use a preset
+python script/run_medical_pipeline.py --config configs/research.yaml \
+  --input /abs/path/to/corpus.jsonl
+
+# Override config at the CLI (CLI wins over YAML)
+python script/run_medical_pipeline.py --config configs/research.yaml \
+  --pivot-count 3000 \
+  --input /abs/path/to/corpus.jsonl
+
+# Show the final merged config without running
+python script/run_medical_pipeline.py --config configs/research.yaml \
+  --input /abs/path/to/corpus.jsonl --show-config
+```
+
+In the research shell runner, you can also pass a config file:
+
+```
+CONFIG_FILE=configs/research.yaml RUN_ROOT=/tmp/custom_root \
+bash script/run_medical_pipeline_research.sh
+```
+
+See `docs/config_schema.md` for the full schema and `configs/examples/custom_example.yaml`
+for environment variable substitution patterns.
+
 ### Modes: Smoke test vs Research
 
 - Smoke test (default quickstart): small corpus (~5MB), fast config for sanity checks.

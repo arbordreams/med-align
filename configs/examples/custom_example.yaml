@@ -1,0 +1,46 @@
+models:
+  source_tokenizer: "${SRC_TOK:-BioMistral/BioMistral-7B}"
+  target_tokenizer: "${TGT_TOK:-mistralai/Mistral-7B-v0.3}"
+  source_model: "${SRC_MODEL:-BioMistral/BioMistral-7B}"
+
+corpus:
+  size_gb: ${CORPUS_SIZE_GB:-1.0}
+  byte_budget: 0
+  deduplicate: true
+  hash_name: "sha256"
+
+term_mining:
+  top_k: ${TERM_TOP_K:-1000}
+  min_frequency: ${MIN_TERM_FREQ:-3}
+  use_tfidf: true
+
+embedding:
+  backend: "fasttext"
+  fasttext:
+    epochs: ${FASTTEXT_EPOCHS:-20}
+    mincount: ${FASTTEXT_MINCOUNT:-1}
+    lr: ${FASTTEXT_LR:-0.05}
+    thread: null
+
+alignment:
+  pivot_count: ${PIVOT_COUNT:-1500}
+  similarity_threshold: ${SIMILARITY_THRESHOLD:-0.3}
+
+tokenization:
+  workers: null
+  cache_dir: "${HF_DATASETS_CACHE:-${HOME}/.cache/huggingface}"
+  min_line_length: 0
+
+evaluation:
+  enabled: true
+  datasets:
+    - "${EVAL_DATASET:-uiyunkim-hub/pubmed-abstract:train}"
+  max_samples: ${MAX_EVAL:-1000}
+  qa: ${QA_ENABLED:-true}
+
+pipeline:
+  run_root: "${RUN_ROOT:-runs/tokenizer_adapt}"
+  max_retries: 1
+  retry_backoff: 5.0
+
+

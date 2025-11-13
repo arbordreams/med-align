@@ -65,11 +65,8 @@ PY
 )"
 fi
 
-# Research-grade defaults
-TERM_TOP_K="${TERM_TOP_K:-2000}"
-MIN_TERM_FREQ="${MIN_TERM_FREQ:-3}"
-USE_TFIDF="--use-tfidf"  # always on in research mode
-PIVOT_COUNT="${PIVOT_COUNT:-2000}"
+# Research-grade defaults (keep performance knobs; logical knobs now come from config unless explicitly overridden)
+USE_TFIDF="--use-tfidf"
 FASTTEXT_EPOCHS="${FASTTEXT_EPOCHS:-30}"
 FASTTEXT_MINCOUNT="${FASTTEXT_MINCOUNT:-1}"
 FASTTEXT_LR="${FASTTEXT_LR:-0.05}"
@@ -96,6 +93,10 @@ if [ "${OPTIMAL_TOKENIZER_WORKERS}" -gt 64 ]; then
 fi
 TOKENIZER_WORKERS="${TOKENIZER_WORKERS:-${OPTIMAL_TOKENIZER_WORKERS}}"
 # Similarity threshold (used by alignment step)
+SIMILARITY_THRESHOLD_USER_OVERRIDE=false
+if [[ -n "${SIMILARITY_THRESHOLD+x}" ]]; then
+  SIMILARITY_THRESHOLD_USER_OVERRIDE=true
+fi
 SIMILARITY_THRESHOLD="${SIMILARITY_THRESHOLD:-0.3}"
 
 # Log detected hardware and auto-scaled settings
@@ -135,24 +136,44 @@ fi
 echo "[research] Medical corpus ready: ${AGGREGATED_CORPUS}"
 
 echo "[research] Launching research-grade pipeline..."
-python "${ROOT_DIR}/script/run_medical_pipeline.py" \
-  --input "${AGGREGATED_CORPUS}" \
-  --source-tokenizer "${SRC_TOK}" \
-  --target-tokenizer "${TGT_TOK}" \
-  --source-model "${SRC_MODEL}" \
-  --embedding-backend fasttext \
-  --tokenizer-workers "${TOKENIZER_WORKERS}" \
-  --evaluation-dataset "${EVAL_DATASET}" \
-  --max-eval-samples "${MAX_EVAL}" \
-  --research-mode \
-  --corpus-size-gb "${CORPUS_SIZE_GB}" \
-  --fasttext-epochs "${FASTTEXT_EPOCHS}" \
-  --fasttext-mincount "${FASTTEXT_MINCOUNT}" \
-  --fasttext-lr "${FASTTEXT_LR}" \
-  --fasttext-thread "${FASTTEXT_THREAD}" \
-  --similarity-threshold "${SIMILARITY_THRESHOLD:-0.3}" \
-  --evaluate \
-  --qa
+PY_ARGS=(
+  "--input" "${AGGREGATED_CORPUS}"
+  "--source-tokenizer" "${SRC_TOK}"
+  "--target-tokenizer" "${TGT_TOK}"
+  "--source-model" "${SRC_MODEL}"
+  "--run-root" "${RUN_ROOT}"
+  "--evaluate"
+  "--qa"
+  "--research-mode"
+)
+# If a CONFIG_FILE is provided, prefer it and avoid passing knobs unless explicitly overridden
+if [[ -n "${CONFIG_FILE:-}" ]]; then
+  PY_ARGS+=( "--config" "${CONFIG_FILE}" )
+  # Allow explicit env overrides to win over config
+  if [[ -n "${EVAL_DATASET:-}" ]]; then PY_ARGS+=( "--evaluation-dataset" "${EVAL_DATASET}" ); fi
+  if [[ -n "${MAX_EVAL:-}" ]]; then PY_ARGS+=( "--max-eval-samples" "${MAX_EVAL}" ); fi
+  if [[ -n "${TOKENIZER_WORKERS:-}" ]]; then PY_ARGS+=( "--tokenizer-workers" "${TOKENIZER_WORKERS}" ); fi
+  if [[ -n "${FASTTEXT_EPOCHS:-}" ]]; then PY_ARGS+=( "--fasttext-epochs" "${FASTTEXT_EPOCHS}" ); fi
+  if [[ -n "${FASTTEXT_MINCOUNT:-}" ]]; then PY_ARGS+=( "--fasttext-mincount" "${FASTTEXT_MINCOUNT}" ); fi
+  if [[ -n "${FASTTEXT_LR:-}" ]]; then PY_ARGS+=( "--fasttext-lr" "${FASTTEXT_LR}" ); fi
+  if [[ -n "${FASTTEXT_THREAD:-}" ]]; then PY_ARGS+=( "--fasttext-thread" "${FASTTEXT_THREAD}" ); fi
+  if [[ "${SIMILARITY_THRESHOLD_USER_OVERRIDE}" == "true" ]]; then PY_ARGS+=( "--similarity-threshold" "${SIMILARITY_THRESHOLD}" ); fi
+  if [[ -n "${CORPUS_SIZE_GB:-}" ]]; then PY_ARGS+=( "--corpus-size-gb" "${CORPUS_SIZE_GB}" ); fi
+else
+  # No config: retain explicit CLI to match historical behavior
+  PY_ARGS+=( "--embedding-backend" "fasttext" )
+  PY_ARGS+=( "--tokenizer-workers" "${TOKENIZER_WORKERS}" )
+  PY_ARGS+=( "--evaluation-dataset" "${EVAL_DATASET}" )
+  PY_ARGS+=( "--max-eval-samples" "${MAX_EVAL}" )
+  PY_ARGS+=( "--corpus-size-gb" "${CORPUS_SIZE_GB}" )
+  PY_ARGS+=( "--fasttext-epochs" "${FASTTEXT_EPOCHS}" )
+  PY_ARGS+=( "--fasttext-mincount" "${FASTTEXT_MINCOUNT}" )
+  PY_ARGS+=( "--fasttext-lr" "${FASTTEXT_LR}" )
+  PY_ARGS+=( "--fasttext-thread" "${FASTTEXT_THREAD}" )
+  PY_ARGS+=( "--similarity-threshold" "${SIMILARITY_THRESHOLD:-0.3}" )
+fi
+
+python "${ROOT_DIR}/script/run_medical_pipeline.py" "${PY_ARGS[@]}"
 
 echo "[research] Completed. See ${RUN_ROOT} for artifacts."
 
