@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 import concurrent.futures as _futures
 
+import torch
 from transformers import AutoTokenizer
 
 try:
@@ -505,6 +506,31 @@ def vocab_adaptation(
     train_start_idx_stage2 = int(config.get("train_start_idx_stage2", 2560000))  # type: ignore[arg-type]
     seed = int(config.get("seed", 0))  # type: ignore[arg-type]
     use_flash_attn = bool(config.get("use_flash_attn", True)) and _is_flash_attn_available()
+
+    # Skip vocab adaptation when dataset is too small or CPU-only environments
+    try:
+        ds_preview = datasets.load_from_disk(dataset_path)
+        train_split = ds_preview["train"] if "train" in ds_preview else next(iter(ds_preview.values()))
+        max_sample_len = max(len(sample.get("input_ids", [])) for sample in train_split)
+    except Exception:
+        ds_preview = None
+        train_split = []
+        max_sample_len = 0
+
+    if max_sample_len <= 0 or len(train_split) < 8:
+        logger.warning(
+            "Vocabulary adaptation skipped: dataset too small (train samples=%d, max tokens=%d).",
+            len(train_split),
+            max_sample_len,
+        )
+        return {"skipped": "dataset_too_small"}
+
+    if max_seq_length > max_sample_len:
+        max_seq_length = max_sample_len
+
+    if not torch.cuda.is_available():
+        logger.warning("Vocabulary adaptation skipped: CUDA/GPU not available.")
+        return {"skipped": "no_gpu"}
 
     # Common argument fragments
     def _common_args() -> list[str]:
