@@ -34,24 +34,58 @@ nvidia-smi              # Expect CUDA Version: 12.8
 conda create -n tokalign python=3.12
 conda activate tokalign
 
-# Install PyTorch first. Use the CUDA 12.8 wheel on Linux GPU hosts:
-pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+# Recommended: Use the automated installation script (handles PyTorch CUDA wheels correctly):
+chmod +x install_deps.sh && ./install_deps.sh
 
-# On macOS or CPU-only environments, omit the CUDA index:
-# pip install torch==2.8.0
+# OR manually install PyTorch first, then requirements:
+# For CUDA 12.8 on Linux GPU hosts (torch 2.8.0 not available, use 2.9.1):
+pip install torch==2.9.1+cu128 torchvision==0.24.1+cu128 --index-url https://download.pytorch.org/whl/cu128
 
+# On macOS or CPU-only environments:
+# pip install torch==2.9.1 torchvision==0.24.1
+
+# Then install remaining dependencies:
 pip install -r requirements.txt
 ```
 
 `requirements.txt` pins modern PyPI builds compatible with Python 3.12, including the precompiled `fasttext-wheel>=0.9.2` distribution required for the FastText embedding backend.
 
-The medical pipeline is tested with **Python 3.12**, **CUDA 12.8**, and **PyTorch 2.8.0**. Confirm your interpreter with `python --version` before running the installers.
+The medical pipeline is tested with **Python 3.12**, **CUDA 12.8**, and **PyTorch 2.9.1** (torch 2.8.0 is not available for CUDA 12.8 wheels). Confirm your interpreter with `python --version` before running the installers.
 
 Linux-only extras (`deepspeed`, `bitsandbytes`) are guarded by environment markers and will be skipped automatically on unsupported platforms. `flash-attn` is installed best-effort by the helper script and is optional for the medical pipeline.
 
+### Lambda Labs 24.04 quickstart
+
+On a Lambda Labs 24.04 image (Ubuntu 24.04 with CUDA 12.8 and Python 3.12):
+
+```bash
+# Clone and setup
+git clone https://github.com/arbordreams/med-align.git
+cd med-align
+git checkout feat/parallel-fasttext-5gb
+
+# Install dependencies (handles pre-installed packages)
+chmod +x install_deps.sh
+./install_deps.sh
+
+# Build corpus and run pipeline
+export MAIN_DIR=$(pwd)
+export MEDICAL_DATASETS="pubmed_abstract"
+export MEDICAL_MAX_SAMPLES=1000
+export MEDICAL_BYTE_BUDGET=$((5 * 1024 * 1024))  # 5MB
+
+bash script/build_medical_corpus.sh
+
+python script/run_medical_pipeline.py \
+  --config configs/smoke_test.yaml \
+  --input runs/corpora/default_medical/aggregated/medical_corpus.jsonl
+```
+
+**Note:** Lambda Labs 24.04 images may have PyTorch pre-installed. The install script will detect and reinstall with the correct CUDA 12.8 wheels to ensure compatibility.
+
 ### RunPod quickstart
 
-On a fresh RunPod Torch 2.8 (CUDA 12.8) image, the entire setup and a tiny end-to-end run can be launched with:
+On a fresh RunPod Torch 2.9 (CUDA 12.8) image, the entire setup and a tiny end-to-end run can be launched with:
 
 ```
 git clone https://github.com/your-org/align-medical.git && cd align-medical && chmod +x install_deps.sh && ./install_deps.sh && bash script/quickstart_runpod.sh
