@@ -1,12 +1,11 @@
 #!/bin/bash
 # Installation script for TokAlign medical pipeline dependencies.
 # - Supports both virtualenv installs (if .venv exists) and global installs.
-# - Works on Lambda Labs 24.04, RunPod, and other CUDA 12.8 environments.
-# - Installs PyTorch 2.9.1 (CUDA 12.8 wheels) first (torch 2.8.0 not available).
+# - Installs PyTorch 2.8.0 (CUDA 12.8 wheels) first.
 # - Installs remaining requirements, excluding torch/flash-attn to avoid conflicts.
 # - Pulls in fasttext-wheel>=0.9.2 for the FastText embedding backend (prebuilt for Python 3.12).
 # - Installs flash-attn with robust fallbacks (prebuilt wheels first, then source with --no-build-isolation).
-# - Verifies flash-attn import; continues without it if unavailable (non-fatal).
+# - Verifies flash-attn import; exits non-zero if unavailable.
 
 set -euo pipefail
 
@@ -40,19 +39,10 @@ echo "[install] Installing torch==2.9.1 and compatible torchvision (CUDA 12.8 wh
 # Install torch 2.9.1 (torch 2.8.0 not available in CUDA 12.8 wheels) with compatible torchvision
 # Use --user flag only if not in venv (venv detection happens above)
 # torchvision 0.24.1 is compatible with torch 2.9.1
-# Lambda Labs 24.04 images may have torch pre-installed, so we use --force-reinstall
 PIP_USER_FLAG=""
 if [ -z "${VIRTUAL_ENV:-}" ]; then
   PIP_USER_FLAG="--user"
 fi
-
-# Check if torch is already installed and what version
-if python -c "import torch; print(torch.__version__)" 2>/dev/null; then
-  CURRENT_TORCH=$(python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "")
-  echo "[install] Detected existing PyTorch: ${CURRENT_TORCH}"
-  echo "[install] Reinstalling with CUDA 12.8 wheels to ensure compatibility..."
-fi
-
 pip install ${PIP_USER_FLAG} --force-reinstall --no-cache-dir torch==2.9.1+cu128 torchvision==0.24.1+cu128 --index-url https://download.pytorch.org/whl/cu128
 
 echo "[install] Installing remaining Python dependencies (excluding torch/flash-attn)..."
@@ -74,47 +64,41 @@ rm -f "${TMP_REQ}"
 echo "[install] Installing tf-keras for transformers TensorFlow compatibility..."
 pip install --no-cache-dir tf-keras
 
-echo "[install] Installing flash-attn (optional, for torch 2.9.1 compatibility)..."
+echo "[install] Installing flash-attn 2.8.3 (required, pre-built wheel for torch 2.8.0)..."
 # Detect architecture for flash-attn wheel
 ARCH=$(uname -m)
 PY_VER=$(python -c "import sys; print(f'cp{sys.version_info.major}{sys.version_info.minor}')")
-TORCH_VER=$(python -c "import torch; print(torch.__version__.split('+')[0])" 2>/dev/null || echo "2.9.1")
-echo "[install] Detected architecture: ${ARCH}, Python: ${PY_VER}, PyTorch: ${TORCH_VER}"
+echo "[install] Detected architecture: ${ARCH}, Python: ${PY_VER}"
 
 if [ "${ARCH}" = "aarch64" ] || [ "${ARCH}" = "arm64" ]; then
-  echo "[install] ARM64 detected - attempting to install flash-attn from source..."
-  echo "[install] NOTE: Flash-attn compilation on ARM64 can be memory-intensive and time-consuming."
-  echo "[install] Limiting parallel jobs to avoid memory exhaustion (MAX_JOBS=2)..."
-  echo "[install] This may take 10-30 minutes depending on system resources."
+  echo "[install] ARM64 detected - attempting to install flash-attn from source (no pre-built wheel available)..."
+  echo "[install] NOTE: Flash-attn compilation on ARM64 can be memory-intensive."
+  echo "[install] Limiting parallel jobs to avoid memory exhaustion (MAX_JOBS=4)..."
   # Try to install from source for ARM64 with limited parallel jobs
-  # Use MAX_JOBS=2 to reduce memory pressure on ARM64 systems
-  # Flash-attn 2.8.3 should work with torch 2.9.1 when built from source
-  if ! MAX_JOBS=2 pip install --no-cache-dir flash-attn==2.8.3 --no-build-isolation 2>&1 | tee /tmp/flash_attn_build.log; then
+  # This prevents memory exhaustion during compilation (common issue on ARM64)
+  if ! MAX_JOBS=4 pip install --no-cache-dir flash-attn==2.8.3 --no-build-isolation; then
     echo "[install] WARNING: flash-attn source build failed."
-    echo "[install] Common causes:"
-    echo "[install]   - Insufficient RAM (compilation can use 8GB+)"
-    echo "[install]   - Missing CUDA toolkit 12.8+"
-    echo "[install]   - Missing build tools (gcc, make, ninja)"
-    echo "[install]   - CUDA/compiler version mismatch"
+    echo "[install] This may require:"
+    echo "[install]   - CUDA toolkit 12.8+ installed"
+    echo "[install]   - Build tools (gcc, make, ninja)"
+    echo "[install]   - Sufficient RAM (compilation can use 8GB+)"
     echo "[install] Continuing without flash-attn (pipeline will run slower but still functional)."
-    echo "[install] Build log saved to /tmp/flash_attn_build.log"
     echo "[install] You can retry flash-attn installation later if needed."
     # Don't fail the entire installation - flash-attn is optional for basic functionality
-  else
-    echo "[install] flash-attn installation completed successfully"
   fi
 else
-  # x86_64: try pre-built wheel first, then fall back to source
-  # Note: Pre-built wheels for torch 2.9.1 may not exist, so we'll likely build from source
-  echo "[install] Attempting to install flash-attn for torch ${TORCH_VER}..."
-  if ! pip install --no-cache-dir flash-attn==2.8.3 --no-build-isolation 2>&1 | tee /tmp/flash_attn_build.log; then
-    echo "[install] WARNING: flash-attn installation failed."
-    echo "[install] Continuing without flash-attn (pipeline will run slower but still functional)."
-    echo "[install] Build log saved to /tmp/flash_attn_build.log"
-  else
-    echo "[install] flash-attn installation completed successfully"
-  fi
+  # x86_64: use pre-built wheel
+  WHEEL_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-${PY_VER}-${PY_VER}-linux_${ARCH}.whl"
+  echo "[install] Attempting to install pre-built wheel: ${WHEEL_URL}"
+  pip install --no-cache-dir "${WHEEL_URL}" || {
+    echo "[install] WARNING: Pre-built wheel failed, falling back to source build..."
+    pip install --no-cache-dir flash-attn==2.8.3 --no-build-isolation || {
+      echo "[install] ERROR: Failed to install flash-attn."
+      exit 1
+    }
+  }
 fi
+echo "[install] flash-attn installation completed"
 
 echo "[install] Verifying flash-attn import..."
 python - <<'PY'
