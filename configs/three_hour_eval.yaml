@@ -1,0 +1,69 @@
+models:
+  source_tokenizer: "BioMistral/BioMistral-7B"
+  target_tokenizer: "mistralai/Mistral-7B-v0.3"
+  source_model: "BioMistral/BioMistral-7B"
+
+corpus:
+  size_gb: 1.0      # ~1 GiB target for ~3h run on GH200
+  byte_budget: 0    # 0 = derive from size_gb
+  deduplicate: true
+  hash_name: "sha256"
+
+term_mining:
+  top_k: 1500
+  min_frequency: 3
+  use_tfidf: true
+
+embedding:
+  backend: "fasttext"
+  fasttext:
+    epochs: 10
+    mincount: 3
+    lr: 0.05
+    thread: null     # auto-scaled based on detected vCPUs
+
+alignment:
+  pivot_count: 1500
+  similarity_threshold: 0.3
+
+tokenization:
+  workers: null      # auto-scaled
+  cache_dir: null
+  min_line_length: 0
+
+# TokAlign vocabulary adaptation (two-stage fine-tune)
+vocab_adaptation:
+  enabled: true
+  stage1_steps: 600          # embeddings-only warmup
+  stage2_steps: 1400         # Stage 2 with LoRA + Adafactor for stability/speed
+  lr_stage1: 0.0005
+  lr_stage2: 0.00005
+  batch_size: 2
+  gradient_accumulation: 16
+  max_seq_length: 1024
+  train_start_idx_stage2: 256000
+  stage2_use_lora: true
+  stage2_optimizer: "adafactor"
+  lora_r: 64
+  lora_alpha: 16
+  lora_dropout: 0.1
+  lora_target_modules: "q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj"
+  seed: 0
+  use_flash_attn: false
+  bf16: false
+
+evaluation:
+  enabled: true
+  datasets:
+    - "uiyunkim-hub/pubmed-abstract:train"
+  max_samples: 1000   # per split
+  qa: true
+  baseline_model: "mistralai/Mistral-7B-v0.3"
+  pubmedqa_dataset: "auto"
+
+pipeline:
+  run_root: "runs/tokenizer_adapt"
+  max_retries: 1
+  retry_backoff: 5.0
+
+
