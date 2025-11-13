@@ -245,12 +245,19 @@ def create_and_prepare_model(args):
             + "It is meant for continued pre-training with packing inputs to consume the entire sequence lengths."
         )
         # from starcoder_flash_attn_monkey_patch import replace_starcoder_attn_with_flash_attn
-        from llama_flash_attn_patch import replace_llama_attn_with_flash_attn
-        # from falcon_flash_attn_monkey_patch import replace_falcon_attn_with_flash_attn
+        try:
+            from llama_flash_attn_patch import replace_llama_attn_with_flash_attn
 
-        # replace_starcoder_attn_with_flash_attn()
-        replace_llama_attn_with_flash_attn()
-        # replace_falcon_attn_with_flash_attn()
+            replace_llama_attn_with_flash_attn()
+            attn_impl = "flash_attention_2"
+        except Exception as exc:
+            warnings.warn(
+                f"Flash-attn requested but not available ({exc}). Falling back to default attention implementation."
+            )
+            args.use_flash_attn = False
+            attn_impl = None
+    else:
+        attn_impl = None
     device_map = None
     bnb_config = None
     load_in_8bit = args.use_8bit_qunatization
@@ -275,15 +282,22 @@ def create_and_prepare_model(args):
     if args.use_4bit_qunatization or args.use_8bit_qunatization:
         device_map = "auto"  # {"": 0}
 
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model_name,
+    torch_dtype = torch.bfloat16 if args.bf16 else torch.float32
+
+    model_kwargs = dict(
         load_in_8bit=load_in_8bit,
         quantization_config=bnb_config,
         device_map=device_map,
         use_cache=not args.use_gradient_checkpointing,
-        attn_implementation="flash_attention_2",
-        torch_dtype=torch.bfloat16,
+        torch_dtype=torch_dtype,
         trust_remote_code=True,
+    )
+    if attn_impl:
+        model_kwargs["attn_implementation"] = attn_impl
+
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_name,
+        **model_kwargs,
     )
 
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_path if args.tokenizer_path is not None else args.model_name, trust_remote_code=True)
