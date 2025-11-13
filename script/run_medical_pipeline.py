@@ -364,7 +364,11 @@ def main() -> None:
             final_cfg["pipeline"]["retry_backoff"],
             _run_vocab_adaptation,
         )
-        eval_model_path = stage_outputs["vocab_adaptation"]["final_model_dir"]
+        vocab_result = stage_outputs["vocab_adaptation"]
+        eval_model_path = vocab_result.get(
+            "final_model_dir",
+            vocab_result.get("model_dir", eval_model_path),
+        )
 
     eval_enabled = bool(final_cfg["evaluation"]["enabled"]) and not args.skip_eval
     eval_datasets = list(final_cfg["evaluation"]["datasets"] or [])
