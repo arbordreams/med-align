@@ -184,7 +184,16 @@ def create_datasets(tokenizer, args):
     # dataset = load_dataset(args.dataset_name, use_auth_token=True, num_proc=args.num_workers)
     dataset = load_from_disk(args.dataset_name)
     train_data = dataset["train"]
-    valid_data = dataset["test"] if "test" in dataset else dataset["validation"]
+    if "test" in dataset:
+        valid_data = dataset["test"]
+    elif "validation" in dataset:
+        valid_data = dataset["validation"]
+    else:
+        print("[WARN] Validation split not found; using a slice of the training set for evaluation.")
+        if len(train_data) >= 2:
+            valid_data = train_data.select(range(1))
+        else:
+            valid_data = train_data
     print(f"Size of the train set: {len(train_data)}. Size of the validation set: {len(valid_data)}")
     # Optional general-domain mixing for train_data only
     try:
