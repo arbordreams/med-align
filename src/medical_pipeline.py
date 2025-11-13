@@ -507,29 +507,15 @@ def vocab_adaptation(
     seed = int(config.get("seed", 0))  # type: ignore[arg-type]
     use_flash_attn = bool(config.get("use_flash_attn", True)) and _is_flash_attn_available()
 
-    # Skip vocab adaptation when dataset is too small or CPU-only environments
+    # Check GPU availability (vocab adaptation requires GPU for 7B models)
     try:
-        ds_preview = datasets.load_from_disk(dataset_path)
-        train_split = ds_preview["train"] if "train" in ds_preview else next(iter(ds_preview.values()))
-        max_sample_len = max(len(sample.get("input_ids", [])) for sample in train_split)
+        import torch
+        has_gpu = torch.cuda.is_available()
     except Exception:
-        ds_preview = None
-        train_split = []
-        max_sample_len = 0
+        has_gpu = False
 
-    if max_sample_len <= 0 or len(train_split) < 8:
-        logger.warning(
-            "Vocabulary adaptation skipped: dataset too small (train samples=%d, max tokens=%d).",
-            len(train_split),
-            max_sample_len,
-        )
-        return {"skipped": "dataset_too_small", "model_dir": adapted_model_path}
-
-    if max_seq_length > max_sample_len:
-        max_seq_length = max_sample_len
-
-    if not torch.cuda.is_available():
-        logger.warning("Vocabulary adaptation skipped: CUDA/GPU not available.")
+    if not has_gpu:
+        logger.warning("Vocabulary adaptation skipped: CUDA/GPU not available (CPU-only training of 7B model is impractical).")
         return {"skipped": "no_gpu", "model_dir": adapted_model_path}
 
     # Common argument fragments
