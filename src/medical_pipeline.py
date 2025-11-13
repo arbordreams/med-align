@@ -505,6 +505,15 @@ def vocab_adaptation(
     max_seq_length = int(config.get("max_seq_length", 2048))  # type: ignore[arg-type]
     train_start_idx_stage2 = int(config.get("train_start_idx_stage2", 2560000))  # type: ignore[arg-type]
     seed = int(config.get("seed", 0))  # type: ignore[arg-type]
+    # Optional Stage 2 specialization (config-driven)
+    stage2_use_lora = bool(config.get("stage2_use_lora", False))
+    stage2_optimizer = str(config.get("stage2_optimizer", "adamw_torch"))
+    lora_r = int(config.get("lora_r", 64))
+    lora_alpha = int(config.get("lora_alpha", 16))
+    lora_dropout = float(config.get("lora_dropout", 0.1))
+    lora_target_modules = str(
+        config.get("lora_target_modules", "q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj")
+    )
     # Match config default (False) and enable only if available
     use_flash_attn = bool(config.get("use_flash_attn", False)) and _is_flash_attn_available()
     bf16_flag = bool(config.get("bf16", False))
@@ -555,6 +564,9 @@ def vocab_adaptation(
         if torch.cuda.is_available() and not _os_env.environ.get("CUDA_VISIBLE_DEVICES"):
             # Default to first device on single-GPU GH200 nodes; do not override if user set it.
             cuda_env["CUDA_VISIBLE_DEVICES"] = "0"
+        # Improve allocator stability during large optimizer state allocations
+        if not _os_env.environ.get("PYTORCH_CUDA_ALLOC_CONF"):
+            cuda_env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     except Exception:
         pass
 
@@ -604,6 +616,25 @@ def vocab_adaptation(
             str(train_start_idx_stage2),
         ]
     )
+    # Use memory-friendlier optimizer if requested (e.g., Adafactor)
+    if stage2_optimizer:
+        stage2_args.extend(["--optim", stage2_optimizer])
+    # Optionally use LoRA adapters for Stage 2 to reduce trainable parameter footprint
+    if stage2_use_lora:
+        stage2_args.extend(
+            [
+                "--use_peft_lora",
+                "True",
+                "--lora_r",
+                str(lora_r),
+                "--lora_alpha",
+                str(lora_alpha),
+                "--lora_dropout",
+                str(lora_dropout),
+                "--lora_target_modules",
+                lora_target_modules,
+            ]
+        )
     logger.info("Starting vocabulary adaptation Stage 2 (full-model) at %s.", stage2_dir)
     _run_subprocess(stage2_args, env=cuda_env)
 

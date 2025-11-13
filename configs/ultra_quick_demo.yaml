@@ -43,6 +43,13 @@ vocab_adaptation:
   gradient_accumulation: 8
   max_seq_length: 512
   train_start_idx_stage2: 5120   # Minimal offset for smoke test
+  # Stability/perf: enable LoRA in Stage 2 and memory-friendly optimizer
+  stage2_use_lora: true
+  stage2_optimizer: "adafactor"
+  lora_r: 64
+  lora_alpha: 16
+  lora_dropout: 0.1
+  lora_target_modules: "q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj"
   seed: 0
   use_flash_attn: false  # Opt-in: enable if flash-attn is installed (often fails on ARM64/GH200)
   bf16: false
