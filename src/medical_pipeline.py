@@ -523,14 +523,14 @@ def vocab_adaptation(
             len(train_split),
             max_sample_len,
         )
-        return {"skipped": "dataset_too_small"}
+        return {"skipped": "dataset_too_small", "model_dir": adapted_model_path}
 
     if max_seq_length > max_sample_len:
         max_seq_length = max_sample_len
 
     if not torch.cuda.is_available():
         logger.warning("Vocabulary adaptation skipped: CUDA/GPU not available.")
-        return {"skipped": "no_gpu"}
+        return {"skipped": "no_gpu", "model_dir": adapted_model_path}
 
     # Common argument fragments
     def _common_args() -> list[str]:
