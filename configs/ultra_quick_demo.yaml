@@ -35,14 +35,14 @@ tokenization:
 # TokAlign vocabulary adaptation (two-stage fine-tune)
 vocab_adaptation:
   enabled: true
-  stage1_steps: 200
-  stage2_steps: 200
+  stage1_steps: 10   # Minimal for smoke test
+  stage2_steps: 10   # Minimal for smoke test
   lr_stage1: 0.00064
   lr_stage2: 0.00005
   batch_size: 2
   gradient_accumulation: 8
   max_seq_length: 1024
-  train_start_idx_stage2: 102400
+  train_start_idx_stage2: 5120   # Minimal offset for smoke test
   seed: 0
   use_flash_attn: false  # Opt-in: enable if flash-attn is installed (often fails on ARM64/GH200)
   bf16: false
