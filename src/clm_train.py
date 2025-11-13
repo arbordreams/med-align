@@ -222,7 +222,7 @@ def main(args):
         os.environ.get("ACCELERATE_USE_DEEPSPEED", "False").lower() == "true" and args.use_peft_lora
     )
     save_strategy = "no" if is_deepspeed_peft_enabled else "steps"
-    training_arguments = TrainingArguments(
+    training_kwargs = dict(
         output_dir=args.output_dir,
         per_device_train_batch_size=args.per_device_train_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
@@ -234,8 +234,6 @@ def main(args):
         warmup_ratio=args.warmup_ratio,
         lr_scheduler_type=args.lr_scheduler_type,
         num_train_epochs=args.num_train_epochs,
-        # evaluation_strategy="steps",
-        evaluation_strategy=args.evaluation_strategy,
         save_strategy=save_strategy,
         max_steps=args.max_steps,
         eval_steps=args.eval_steps,
@@ -243,15 +241,22 @@ def main(args):
         logging_steps=args.logging_steps,
         torch_compile=True,
         dataloader_num_workers=args.num_workers,
-        # dataloader_prefetch_factor=0,
-        # include_num_input_tokens_seen=True,
-        # split_batches=False,
         push_to_hub=args.push_to_hub,
         save_on_each_node=args.save_on_each_node,
         gradient_checkpointing=args.use_gradient_checkpointing,
         resume_from_checkpoint=args.resume_from_checkpoint,
         ignore_data_skip=args.ignore_data_skip,
     )
+    # Handle renamed evaluation strategy parameter across transformers versions.
+    eval_field_name = None
+    if "eval_strategy" in TrainingArguments.__dataclass_fields__:
+        eval_field_name = "eval_strategy"
+    elif "evaluation_strategy" in TrainingArguments.__dataclass_fields__:
+        eval_field_name = "evaluation_strategy"
+    if eval_field_name and args.evaluation_strategy is not None:
+        training_kwargs[eval_field_name] = args.evaluation_strategy
+
+    training_arguments = TrainingArguments(**training_kwargs)
 
     # model
     model, peft_config, tokenizer = create_and_prepare_model(args)
