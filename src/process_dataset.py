@@ -347,6 +347,11 @@ def prepare_dataset(tokenizer, data_args, model_args, training_args, logger):
         )
 
     if data_args.only_tokenize:
+        # Drop empty validation split (common for tiny corpora when val pct == 0)
+        if isinstance(tokenized_datasets, datasets.DatasetDict):
+            non_empty = {k: v for k, v in tokenized_datasets.items() if getattr(v, "num_rows", len(v)) > 0}
+            if len(non_empty) != len(tokenized_datasets):
+                tokenized_datasets = datasets.DatasetDict(non_empty)
         # save tokenized_dataset
         tokenized_datasets.save_to_disk(data_args.dataset_path_in_disk)
         print("Tokenized dataset is saved to disk",data_args.dataset_path_in_disk)
