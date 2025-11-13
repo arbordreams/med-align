@@ -114,14 +114,22 @@ For automation, the Python runner sequences the entire medical pipeline with
 retry-aware stages and evaluation hooks:
 
 ```
+# 1. Aggregate/limit raw shards (e.g. 50 MB smoke corpus)
+python script/aggregate_corpus.py \
+  --input /abs/path/to/raw_pubmed/*.jsonl \
+  --output /tmp/pubmed_smoke.jsonl \
+  --byte-budget $((50 * 1024 * 1024)) \
+  --deduplicate
+
+# 2. Run the pipeline on the prepared corpus
 python script/run_medical_pipeline.py \
-  --input /abs/path/to/medical/shard_dir \
+  --config configs/ultra_quick_demo.yaml \
+  --input /tmp/pubmed_smoke.jsonl \
   --source-tokenizer BioMistral/BioMistral-7B \
   --target-tokenizer mistralai/Mistral-7B-v0.3 \
   --source-model BioMistral/BioMistral-7B \
   --embedding-backend fasttext \
-  --evaluation-dataset medical_benchmark:test \
-  --evaluate
+  --run-root /lambda/nfs/med-align/tokenizer_adapt
 ```
 
 Logs are written under `runs/logs/` and a roll-up summary can be found in
