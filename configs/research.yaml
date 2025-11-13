@@ -54,6 +54,6 @@ vocab_adaptation:
   max_seq_length: 2048
   train_start_idx_stage2: 2560000
   seed: 0
-  use_flash_attn: true
+  use_flash_attn: false  # Opt-in: enable if flash-attn is installed (often fails on ARM64/GH200)
 
 

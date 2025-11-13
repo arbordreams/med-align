@@ -88,7 +88,7 @@ def get_default_config() -> Dict[str, Any]:
             "max_seq_length": 2048,
             "train_start_idx_stage2": 2560000,
             "seed": 0,
-            "use_flash_attn": True,
+            "use_flash_attn": False,
         },
     }
 
