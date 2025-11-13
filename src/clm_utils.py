@@ -115,8 +115,8 @@ class ConstantLengthDataset(IterableDataset):
             for example in examples:
                 self.current_size += 1
                 yield {
-                    "input_ids": torch.LongTensor(example),
-                    "labels": torch.LongTensor(example),
+                    "input_ids": example,
+                    "labels": example,
                 }
 
     def token_iter(self):
@@ -155,14 +155,14 @@ class ConstantLengthDataset(IterableDataset):
             for example in examples:
                 self.current_size += 1
                 yield {
-                    "input_ids": torch.LongTensor(example),
-                    "labels": torch.LongTensor(example),
+                    "input_ids": example,
+                    "labels": example,
                 }
 
     def sample_mapper(self, sample):
         return {
-            "input_ids": torch.LongTensor(sample["input_ids"]),
-            "labels": torch.LongTensor(sample["input_ids"]),
+            "input_ids": sample["input_ids"],
+            "labels": sample["input_ids"],
         }
     
     def multiprocessing_iter(self):
