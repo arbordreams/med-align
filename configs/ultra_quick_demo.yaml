@@ -5,7 +5,7 @@ models:
   source_model: "BioMistral/BioMistral-7B"
 
 corpus:
-  size_gb: 0.005   # ~5MB quick demo
+  size_gb: 0.05    # ~50MB quick smoke test
   byte_budget: 0   # 0 = derive from size_gb
   deduplicate: true
   hash_name: "sha256"
