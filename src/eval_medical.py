@@ -101,10 +101,11 @@ def evaluate_perplexity(
             return None
 
     # Try progressively less aggressive configs: bf16+flash_attn2 -> fp16 no-flash -> fp32 no-flash
+    # Prefer high-accuracy FP32 first on GH200; fall back to BF16/FP16 only if needed
     model = (
-        _load_and_smoke_test(torch.bfloat16, use_flash=True)
+        _load_and_smoke_test(torch.float32, use_flash=False)
+        or _load_and_smoke_test(torch.bfloat16, use_flash=True)
         or _load_and_smoke_test(torch.float16, use_flash=False)
-        or _load_and_smoke_test(torch.float32, use_flash=False)
     )
     if model is None:
         raise RuntimeError("Failed to load model on CUDA for evaluation after multiple fallbacks.")

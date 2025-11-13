@@ -85,7 +85,7 @@ class ScriptArguments:
         metadata={"help": "Enables fp16 training."},
     )
     bf16: Optional[bool] = field(
-        default=True,
+        default=False,
         metadata={"help": "Enables bf16 training."},
     )
     packing: Optional[bool] = field(
@@ -217,9 +217,22 @@ def main(args):
         print(f"- CUDA available: {_torch.cuda.is_available()}")
     except Exception:
         pass
-    # Disable bf16 when unsupported (e.g., CPU-only environments)
+    # Prefer FP32 on GH200; enable TF32 for speed on Hopper, and disable bf16 if unsupported.
     try:
         import torch as _torch_check
+        if _torch_check.cuda.is_available():
+            try:
+                _torch_check.backends.cuda.matmul.allow_tf32 = True  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            try:
+                _torch_check.backends.cudnn.allow_tf32 = True  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            try:
+                _torch_check.set_float32_matmul_precision("high")
+            except Exception:
+                pass
 
         bf16_supported = False
         if _torch_check.cuda.is_available():
@@ -258,6 +271,7 @@ def main(args):
         save_steps=args.save_steps,
         logging_steps=args.logging_steps,
         torch_compile=False,
+        dataloader_pin_memory=True,
         dataloader_num_workers=args.num_workers,
         push_to_hub=args.push_to_hub,
         save_on_each_node=args.save_on_each_node,
@@ -279,6 +293,11 @@ def main(args):
     # model
     model, peft_config, tokenizer = create_and_prepare_model(args)
     model.config.use_cache = False
+    try:
+        import torch as _torch_dtype_dbg
+        print(f"Model dtype: {next(model.parameters()).dtype} | CUDA: {_torch_dtype_dbg.cuda.is_available()}")
+    except Exception:
+        pass
 
     # remove the gradient of non-embedding
     if args.finetune_embed_only:

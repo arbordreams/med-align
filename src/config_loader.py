@@ -89,6 +89,7 @@ def get_default_config() -> Dict[str, Any]:
             "train_start_idx_stage2": 2560000,
             "seed": 0,
             "use_flash_attn": False,
+            "bf16": False,
         },
     }
 
@@ -201,6 +202,8 @@ def _validate_config_structure(cfg: Dict[str, Any]) -> None:
         raise ValueError("vocab_adaptation.seed must be an integer")
     if not isinstance(va.get("use_flash_attn", True), bool):
         raise ValueError("vocab_adaptation.use_flash_attn must be a boolean")
+    if not isinstance(va.get("bf16", False), bool):
+        raise ValueError("vocab_adaptation.bf16 must be a boolean")
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:

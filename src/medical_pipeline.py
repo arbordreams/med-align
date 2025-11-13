@@ -506,6 +506,7 @@ def vocab_adaptation(
     train_start_idx_stage2 = int(config.get("train_start_idx_stage2", 2560000))  # type: ignore[arg-type]
     seed = int(config.get("seed", 0))  # type: ignore[arg-type]
     use_flash_attn = bool(config.get("use_flash_attn", True)) and _is_flash_attn_available()
+    bf16_flag = bool(config.get("bf16", False))
 
     # Proceed without explicit GPU gate; environment is expected to provide GPU.
 
@@ -527,7 +528,7 @@ def vocab_adaptation(
             str(grad_acc),
             "--use_gradient_checkpointing",
             "--bf16",
-            "True",
+            "True" if bf16_flag else "False",
             "--packing",
             "True",
             "--lr_scheduler_type",
