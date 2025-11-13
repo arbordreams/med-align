@@ -1,10 +1,10 @@
-# NOTE: Install torch and torchvision first with the appropriate wheel (CUDA 12.8 recommended):
-#   pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu128
+# NOTE: On Lambda 24.04 stack, PyTorch 2.7.0 with CUDA 12.8 is pre-installed system-wide.
+# For other environments, install torch first with the appropriate wheel:
+#   pip install torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
 # Then run: pip install -r requirements.txt
-# Note: We use torch 2.8.0 because it has official flash-attn wheels available
 
-torch==2.8.0
-torchvision==0.23.0
+torch>=2.7.0
+torchvision>=0.22.0
 transformers>=4.57.1
 datasets>=4.4.0
 hf-transfer>=0.1.9
