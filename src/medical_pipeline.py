@@ -63,13 +63,13 @@ def _run_subprocess(
     cwd: Optional[Path | str] = None,
 ) -> None:
     logger.debug("Executing command: %s", " ".join(cmd))
-    # Ensure user-installed packages take precedence over system packages
-    user_site = os.path.expanduser("~/.local/lib/python3.12/site-packages")
+    # Ensure the repo's 'src' is importable first in subprocesses
+    repo_root = str(SCRIPT_ROOT)
     pythonpath = os.environ.get("PYTHONPATH", "")
     if pythonpath:
-        pythonpath = f"{user_site}:{pythonpath}"
+        pythonpath = f"{repo_root}:{pythonpath}"
     else:
-        pythonpath = user_site
+        pythonpath = repo_root
     env_dict = {**os.environ, "PYTHONPATH": pythonpath, **(env or {})}
     subprocess.run(cmd, check=True, env=env_dict, cwd=str(cwd) if cwd else None)
 
