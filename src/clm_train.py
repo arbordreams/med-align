@@ -11,9 +11,9 @@ from transformers import (
     EarlyStoppingCallback,
     set_seed as hf_set_seed,
 )
-from clm_utils import *
+from .clm_utils import *
 
-from lr_callback import LRCallback
+from .lr_callback import LRCallback
 
 # Define and parse arguments.
 @dataclass
