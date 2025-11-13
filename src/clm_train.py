@@ -217,6 +217,24 @@ def main(args):
         print(f"- CUDA available: {_torch.cuda.is_available()}")
     except Exception:
         pass
+    # Disable bf16 when unsupported (e.g., CPU-only environments)
+    try:
+        import torch as _torch_check
+
+        bf16_supported = False
+        if _torch_check.cuda.is_available():
+            bf16_supported = bool(
+                getattr(_torch_check.cuda, "is_bf16_supported", lambda: False)()
+            )
+        else:
+            bf16_supported = bool(
+                getattr(_torch_check.cpu, "is_bf16_supported", lambda: False)()
+            )
+    except Exception:
+        bf16_supported = False
+    if args.bf16 and not bf16_supported:
+        print("Warning: bf16 requested but not supported in this environment. Disabling bf16.")
+        args.bf16 = False
     # training arguments
     is_deepspeed_peft_enabled = (
         os.environ.get("ACCELERATE_USE_DEEPSPEED", "False").lower() == "true" and args.use_peft_lora
