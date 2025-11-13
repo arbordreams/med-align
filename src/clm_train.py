@@ -267,6 +267,8 @@ def main(args):
         lr_scheduler_type=args.lr_scheduler_type,
         num_train_epochs=args.num_train_epochs,
         save_strategy=save_strategy,
+        save_total_limit=1,
+        save_safetensors=True,
         max_steps=args.max_steps,
         eval_steps=args.eval_steps,
         save_steps=args.save_steps,
@@ -376,18 +378,29 @@ def main(args):
     # Save everything else on main process
     if trainer.args.process_index == 0:
         print("Sharding model if >10GB...")
-        # FSDP/DeepSpeed save the model as a single `pytorch_model.bin` file, so we need to shard it.
-        # We run this in a subprocess to avoid interference from the accelerators.
-        subprocess.run(
-            [
-                "python",
-                "shard_checkpoint.py",
-                f"--output_dir={args.output_dir}",
-            ],
-            check=True,
-        )
-        if "training_args.bin" in os.listdir(args.output_dir):
-            os.remove(os.path.join(args.output_dir, "training_args.bin"))
+        # If safetensors shards already exist, or shard script is not present, skip sharding.
+        shard_index_path = os.path.join(args.output_dir, "model.safetensors.index.json")
+        shard_script_path = os.path.join(os.path.dirname(__file__), "shard_checkpoint.py")
+        try:
+            need_shard = not os.path.exists(shard_index_path)
+            if need_shard and os.path.isfile(shard_script_path):
+                # Run in a subprocess to avoid interference from accelerators.
+                subprocess.run(
+                    [
+                        "python",
+                        shard_script_path,
+                        f"--output_dir={args.output_dir}",
+                    ],
+                    check=True,
+                )
+            else:
+                print("Skipping checkpoint sharding; shards already present or shard script missing.")
+        except Exception as _e:
+            print(f"Skipping checkpoint sharding due to error: {_e}")
+        # Always cleanup training args to reduce disk footprint
+        training_args_path = os.path.join(args.output_dir, "training_args.bin")
+        if os.path.exists(training_args_path):
+            os.remove(training_args_path)
 
 
 if __name__ == "__main__":
