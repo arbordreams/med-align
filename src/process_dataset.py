@@ -252,18 +252,23 @@ def prepare_dataset(tokenizer, data_args, model_args, training_args, logger):
             cache_dir=model_args.cache_dir,
         )
         if "validation" not in raw_datasets.keys():
-            raw_datasets["validation"] = load_dataset(
-                data_args.dataset_name,
-                data_args.dataset_config_name,
-                split=f"train[:{data_args.validation_split_percentage}%]",
-                cache_dir=model_args.cache_dir,
-            )
-            raw_datasets["train"] = load_dataset(
-                data_args.dataset_name,
-                data_args.dataset_config_name,
-                split=f"train[{data_args.validation_split_percentage}%:]",
-                cache_dir=model_args.cache_dir,
-            )
+            val_pct = int(data_args.validation_split_percentage or 0)
+            if val_pct > 0:
+                raw_datasets["validation"] = load_dataset(
+                    data_args.dataset_name,
+                    data_args.dataset_config_name,
+                    split=f"train[:{val_pct}%]",
+                    cache_dir=model_args.cache_dir,
+                )
+                raw_datasets["train"] = load_dataset(
+                    data_args.dataset_name,
+                    data_args.dataset_config_name,
+                    split=f"train[{val_pct}%:]",
+                    cache_dir=model_args.cache_dir,
+                )
+            else:
+                # Create an empty validation set to satisfy downstream code paths
+                raw_datasets["validation"] = raw_datasets["train"].select(range(0))
     else:
         data_files = {}
         dataset_args = {}
@@ -296,20 +301,25 @@ def prepare_dataset(tokenizer, data_args, model_args, training_args, logger):
         )
         # If no validation data is there, validation_split_percentage will be used to divide the dataset.
         if "validation" not in raw_datasets.keys():
-            raw_datasets["validation"] = load_dataset(
-                extension,
-                data_files=data_files,
-                split=f"train[:{data_args.validation_split_percentage}%]",
-                cache_dir=model_args.cache_dir,
-                **dataset_args,
-            )
-            raw_datasets["train"] = load_dataset(
-                extension,
-                data_files=data_files,
-                split=f"train[{data_args.validation_split_percentage}%:]",
-                cache_dir=model_args.cache_dir,
-                **dataset_args,
-            )
+            val_pct = int(data_args.validation_split_percentage or 0)
+            if val_pct > 0:
+                raw_datasets["validation"] = load_dataset(
+                    extension,
+                    data_files=data_files,
+                    split=f"train[:{val_pct}%]",
+                    cache_dir=model_args.cache_dir,
+                    **dataset_args,
+                )
+                raw_datasets["train"] = load_dataset(
+                    extension,
+                    data_files=data_files,
+                    split=f"train[{val_pct}%:]",
+                    cache_dir=model_args.cache_dir,
+                    **dataset_args,
+                )
+            else:
+                # Create an empty validation set to satisfy downstream code paths
+                raw_datasets["validation"] = raw_datasets["train"].select(range(0))
 
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
     # https://huggingface.co/docs/datasets/loading_datasets.html.
