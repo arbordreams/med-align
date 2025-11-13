@@ -505,7 +505,8 @@ def vocab_adaptation(
     max_seq_length = int(config.get("max_seq_length", 2048))  # type: ignore[arg-type]
     train_start_idx_stage2 = int(config.get("train_start_idx_stage2", 2560000))  # type: ignore[arg-type]
     seed = int(config.get("seed", 0))  # type: ignore[arg-type]
-    use_flash_attn = bool(config.get("use_flash_attn", True)) and _is_flash_attn_available()
+    # Match config default (False) and enable only if available
+    use_flash_attn = bool(config.get("use_flash_attn", False)) and _is_flash_attn_available()
     bf16_flag = bool(config.get("bf16", False))
 
     # Proceed without explicit GPU gate; environment is expected to provide GPU.
@@ -527,6 +528,7 @@ def vocab_adaptation(
             "--gradient_accumulation_steps",
             str(grad_acc),
             "--use_gradient_checkpointing",
+            "True",
             "--bf16",
             "True" if bf16_flag else "False",
             "--packing",
