@@ -505,15 +505,20 @@ def main():
         config = AutoConfig.from_pretrained(model_args.config_name, trust_remote_code=True, **config_kwargs)
     elif model_args.model_name_or_path:
         candidate_path = model_args.model_name_or_path
-        local_config = os.path.join(candidate_path, "config.json")
-        if os.path.isfile(local_config):
+        # Try loading from Hub first, then check for local file
+        try:
             config = AutoConfig.from_pretrained(candidate_path, trust_remote_code=True, **config_kwargs)
-        else:
-            logger.warning(
-                "Unrecognized config in %s. Falling back to AutoConfig.from_pretrained with mistralai/Mistral-7B-v0.3.",
-                candidate_path,
-            )
-            config = AutoConfig.from_pretrained("mistralai/Mistral-7B-v0.3", trust_remote_code=True, **config_kwargs)
+        except Exception:
+            # Fallback: check if it's a local path with config.json
+            local_config = os.path.join(candidate_path, "config.json")
+            if os.path.isfile(local_config):
+                config = AutoConfig.from_pretrained(candidate_path, trust_remote_code=True, **config_kwargs)
+            else:
+                logger.warning(
+                    "Failed to load config from %s (not found locally or on Hub). Falling back to mistralai/Mistral-7B-v0.3.",
+                    candidate_path,
+                )
+                config = AutoConfig.from_pretrained("mistralai/Mistral-7B-v0.3", trust_remote_code=True, **config_kwargs)
     else:
         config = CONFIG_MAPPING[model_args.model_type]()
         logger.warning("You are instantiating a new config instance from scratch.")

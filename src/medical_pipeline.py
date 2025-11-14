@@ -337,6 +337,28 @@ def train_embeddings_and_align(
                     logger.exception("FastText training failed for %s: %s", corpus_path, exc)
                     raise
 
+    # Infer vocab sizes from tokenizers before evaluating coverage/alignment
+    try:
+        source_tok = AutoTokenizer.from_pretrained(tokenizer_source, trust_remote_code=True)
+        target_tok = AutoTokenizer.from_pretrained(tokenizer_target, trust_remote_code=True)
+        source_vocab_size = int(len(source_tok))
+        target_vocab_size = int(len(target_tok))
+        logger.info(
+            "Tokenizer vocab sizes (len) source=%d (reported=%s) target=%d (reported=%s)",
+            source_vocab_size,
+            getattr(source_tok, "vocab_size", None),
+            target_vocab_size,
+            getattr(target_tok, "vocab_size", None),
+        )
+    except Exception as tok_exc:  # pragma: no cover
+        logger.warning(
+            "Failed to load tokenizers to infer vocab sizes (%s). Falling back to 32768 for both.",
+            tok_exc,
+        )
+        # Reasonable default for Mistral-7B / BioMistral-7B; prevents out-of-range alignment
+        source_vocab_size = 32768
+        target_vocab_size = 32768
+
     logger.info("Counting vocabulary overlaps between %s and %s.", tokenizer_source, tokenizer_target)
     vocab_count_path = align_dir / "vocab_mapping.json"
     cmd = [
@@ -381,27 +403,6 @@ def train_embeddings_and_align(
 
     align_matrix_path = align_dir / "align_matrix.json"
     gold_mapping = gold_mapping_path or str(vocab_count_path)
-    # Infer vocab sizes from tokenizers to ensure full ID coverage during alignment
-    try:
-        source_tok = AutoTokenizer.from_pretrained(tokenizer_source, trust_remote_code=True)
-        target_tok = AutoTokenizer.from_pretrained(tokenizer_target, trust_remote_code=True)
-        source_vocab_size = int(len(source_tok))
-        target_vocab_size = int(len(target_tok))
-        logger.info(
-            "Tokenizer vocab sizes (len) source=%d (reported=%s) target=%d (reported=%s)",
-            source_vocab_size,
-            getattr(source_tok, "vocab_size", None),
-            target_vocab_size,
-            getattr(target_tok, "vocab_size", None),
-        )
-    except Exception as tok_exc:  # pragma: no cover
-        logger.warning(
-            "Failed to load tokenizers to infer vocab sizes (%s). Falling back to 32768 for both.",
-            tok_exc,
-        )
-        # Reasonable default for Mistral-7B / BioMistral-7B; prevents out-of-range alignment
-        source_vocab_size = 32768
-        target_vocab_size = 32768
     cmd = [
         sys.executable,
         str(SCRIPT_ROOT / "src" / "cal_trans_matrix.py"),
@@ -832,4 +833,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

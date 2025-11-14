@@ -1,0 +1,69 @@
+models:
+  source_tokenizer: "BioMistral/BioMistral-7B"
+  target_tokenizer: "mistralai/Mistral-7B-v0.3"
+  source_model: "BioMistral/BioMistral-7B"
+
+corpus:
+  size_gb: 10.0
+  byte_budget: 0   # 0 = derive from size_gb
+  deduplicate: true
+  hash_name: "sha256"
+
+term_mining:
+  top_k: 2000
+  min_frequency: 3
+  use_tfidf: true
+
+embedding:
+  backend: "fasttext"
+  fasttext:
+    epochs: 30
+    mincount: 1
+    lr: 0.05
+    thread: null   # auto-scaled based on detected vCPUs
+
+alignment:
+  pivot_count: 2000
+  similarity_threshold: 0.4  # Increased from 0.3 for higher quality alignments
+
+tokenization:
+  workers: null   # auto-scaled
+  cache_dir: null
+  min_line_length: 0
+
+evaluation:
+  enabled: true
+  datasets:
+    - "uiyunkim-hub/pubmed-abstract:train"
+  max_samples: 1000
+  qa: true
+  baseline_model: "mistralai/Mistral-7B-v0.3"
+
+pipeline:
+  run_root: "runs/tokenizer_adapt"
+  max_retries: 1
+  retry_backoff: 5.0
+
+vocab_adaptation:
+  enabled: true
+  # Stage 1: Embeddings-only warmup with conservative LR for stability
+  stage1_steps: 2500
+  lr_stage1: 2e-5  # Optimized: Conservative LR for stability (vs paper's 6.4e-4)
+  # Stage 2: Full model fine-tuning with LoRA for stability
+  stage2_steps: 2500
+  lr_stage2: 5.0e-5  # Standard for 7B models
+  batch_size: 4  # Increased from 2 for better gradient estimates
+  gradient_accumulation: 16
+  max_seq_length: 2048
+  train_start_idx_stage2: 2000000  # Optimized: 20% skip for 10GB corpus (~10M examples)
+  # LoRA for Stage 2: Better stability and memory efficiency
+  stage2_use_lora: true
+  stage2_optimizer: "adamw_torch"
+  lora_r: 64
+  lora_alpha: 16
+  lora_dropout: 0.1
+  lora_target_modules: "q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj"
+  seed: 0
+  use_flash_attn: false  # Opt-in: enable if flash-attn is installed (often fails on ARM64/GH200)
+  bf16: true  # Optimized: Enable for better performance (if supported)
+

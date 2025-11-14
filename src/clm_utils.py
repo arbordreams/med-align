@@ -114,8 +114,8 @@ class ConstantLengthDataset(IterableDataset):
 
             examples = buffer
             
-            # if self.shuffle:
-            #     random.shuffle(examples)
+            if self.shuffle:
+                random.shuffle(examples)
 
             for example in examples:
                 self.current_size += 1
