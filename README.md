@@ -282,9 +282,9 @@ python src/eval_medical.py \
   --output runs/tokenizer_adapt/<timestamp>/evaluation.json
 ```
 
-PubMedQA accuracy and coverage metrics:
+MedMCQA accuracy and coverage metrics:
 
-- The evaluator will try BigBio PubMedQA test first and fall back to `pubmed_qa:pqa_labeled:train` (streaming) if the test split is unavailable.
+- The evaluator uses `openlifescienceai/medmcqa` (validation split) and fails fast if the dataset is unavailable.
 - Results compare the adapted model against the baseline Mistral-7B-v0.3 by default and include tokenization and alignment coverage metrics.
 
 ```
@@ -293,9 +293,9 @@ python -m src.eval_medical \
   --tokenizer runs/tokenizer_adapt/<timestamp>/vocab_adaptation/stage2_full/checkpoint-<steps> \
   --dataset uiyunkim-hub/pubmed-abstract:train \
   --max-samples 1000 \
-  --run-pubmedqa \
+  --run-medmcqa \
   --baseline-model mistralai/Mistral-7B-v0.3 \
-  --pubmedqa-dataset auto \
+  --medmcqa-split validation \
   --output runs/tokenizer_adapt/<timestamp>/metrics/medical_eval.json
 ```
 

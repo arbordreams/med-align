@@ -313,96 +313,52 @@ def _load_model_with_fallbacks(model_path: str, tokenizer: AutoTokenizer) -> Aut
     return model
 
 
-def _try_load_pubmedqa_bigbio(split: str) -> Optional[datasets.IterableDataset]:
+def _extract_medmcqa_fields(example: Dict[str, Any]) -> Tuple[str, List[str], Optional[int]]:
     """
-    Try to load BigBio PubMedQA 'source' labeled split.
-    Returns streaming IterableDataset or None on failure.
+    Normalize MedMCQA entry -> (question, [opts], gold_index)
+    """
+    question = str(example.get("question") or example.get("Q") or "")
+    options = [
+        str(example.get("opa") or example.get("A") or ""),
+        str(example.get("opb") or example.get("B") or ""),
+        str(example.get("opc") or example.get("C") or ""),
+        str(example.get("opd") or example.get("D") or ""),
+    ]
+    answer = example.get("cop") or example.get("answer") or example.get("label")
+    idx: Optional[int] = None
+    if isinstance(answer, str):
+        ans = answer.strip().lower()
+        idx = {"a": 0, "b": 1, "c": 2, "d": 3}.get(ans)
+    elif isinstance(answer, int):
+        idx = answer if 0 <= answer <= 3 else None
+    return question, options, idx
+
+
+def _load_medmcqa(split: str = "validation") -> datasets.Dataset:
+    """
+    Load the openlifescienceai/medmcqa dataset.
     """
     try:
-        ds = datasets.load_dataset(
-            "bigbio/pubmed_qa",
-            "pubmed_qa_labeled_fold0_source",
-            split=split,
-            streaming=True,
-        )
-        logger.info("Loaded bigbio/pubmed_qa (source) split=%s (streaming).", split)
-        return ds
-    except Exception as e:
-        logger.warning("BigBio pubmed_qa source split=%s unavailable: %s", split, e)
-        try:
-            ds = datasets.load_dataset(
-                "bigbio/pubmed_qa",
-                "pubmed_qa_labeled_fold0",
-                split=split,
-                streaming=True,
-            )
-            logger.info("Loaded bigbio/pubmed_qa (fold0) split=%s (streaming).", split)
-            return ds
-        except Exception as e2:
-            logger.warning("BigBio pubmed_qa fold0 split=%s unavailable: %s", split, e2)
-    return None
+        ds = datasets.load_dataset("openlifescienceai/medmcqa", split=split)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Unable to load openlifescienceai/medmcqa split='{split}'. "
+            "Verify network access and dataset availability."
+        ) from exc
+    logger.info("Loaded openlifescienceai/medmcqa split=%s (%d rows).", split, len(ds))
+    return ds
 
 
-def _try_load_pubmedqa_standard(split: str) -> Tuple[datasets.IterableDataset, str]:
-    """
-    Load standard pubmed_qa with a reasonable fallback to train if requested split is missing.
-    Returns (dataset, resolved_split).
-    """
-    cfg = "pqa_labeled"
-    try:
-        ds = datasets.load_dataset("pubmed_qa", cfg, split=split, streaming=True)
-        logger.info("Loaded pubmed_qa:%s split=%s (streaming).", cfg, split)
-        return ds, split
-    except Exception as e:
-        logger.warning("pubmed_qa:%s split=%s unavailable (%s); falling back to train.", cfg, split, e)
-        ds = datasets.load_dataset("pubmed_qa", cfg, split="train", streaming=True)
-        logger.info("Loaded pubmed_qa:%s split=train (streaming).", cfg)
-        return ds, "train"
-
-
-def _extract_pubmedqa_fields(example: Dict[str, Any]) -> Tuple[str, str, str]:
-    """
-    Robust extraction for both BigBio and standard schemas.
-    Returns (question, context_text, gold_label).
-    """
-    if "QUESTION" in example:
-        question = str(example.get("QUESTION") or "")
-        contexts = example.get("CONTEXTS") or []
-        if not isinstance(contexts, list):
-            contexts = [str(contexts)]
-        ctx = " ".join([str(c) for c in contexts if isinstance(c, (str,))])
-        label = str(example.get("final_decision") or "").strip().lower()
-        return question, ctx, label
-    question = str(example.get("question") or "")
-    ctx_field = example.get("context")
-    if isinstance(ctx_field, dict):
-        ctx_list = ctx_field.get("contexts") or []
-        if not isinstance(ctx_list, list):
-            ctx_list = [str(ctx_list)]
-        ctx = " ".join([str(c) for c in ctx_list if isinstance(c, (str,))])
-    elif isinstance(ctx_field, list):
-        ctx = " ".join([str(c) for c in ctx_field])
-    else:
-        ctx = str(ctx_field or "")
-    label = str(example.get("final_decision") or "").strip().lower()
-    return question, ctx, label
-
-
-def evaluate_pubmedqa(
+def evaluate_medmcqa(
     *,
     model_path: str,
     tokenizer_path: str,
-    split: str = "test",
-    max_samples: int | None = 200,
-    dataset_preference: str = "auto",
+    split: str = "validation",
+    max_samples: int | None = 2000,
 ) -> dict:
     """
-    Zero-shot PubMedQA accuracy using conditional likelihood over {yes,no,maybe}.
-
-    Uses the official PubMedQA dataset from bigbio/pubmed_qa with the
-    pubmed_qa_labeled_fold0_source config.
-    Only uses the requested split (default: test) for evaluation.
-    No fallbacks to train/validation and no alternate datasets.
+    Multiple-choice (A–D) evaluation on the MedMCQA benchmark.
+    Scores each option via log-prob of its text and picks the highest.
     """
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA required for eval")
@@ -412,49 +368,44 @@ def evaluate_pubmedqa(
     model = _load_model_with_fallbacks(model_path, tokenizer)
     dtype = next(model.parameters()).dtype
 
-    # Preferred BigBio; fallback to standard train split if BigBio unavailable in this environment.
-    ds: Optional[datasets.IterableDataset] = None
-    resolved_split = split
-    if dataset_preference in ("auto", "bigbio"):
-        ds = _try_load_pubmedqa_bigbio(split)
-    if ds is None:
-        ds, resolved_split = _try_load_pubmedqa_standard(split)
-    labels = ["yes", "no", "maybe"]
+    ds = _load_medmcqa(split)
+    labels = ["A", "B", "C", "D"]
     correct = 0
     total = 0
     per_class = {k: {"correct": 0, "total": 0} for k in labels}
-    def _score_answer(prompt: str, answer: str) -> float:
-        # Compute negative loss over answer tokens only
-        full = f"{prompt} {answer}"
-        enc_full = tokenizer(full, return_tensors="pt", truncation=True, max_length=256)
-        enc_prompt = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=256)
-        input_ids = enc_full["input_ids"][0]
-        cutoff = enc_prompt["input_ids"].shape[1]
-        labels_ids = input_ids.clone()
-        labels_ids[:cutoff] = -100  # ignore prompt tokens
-        with torch.inference_mode(), torch.autocast("cuda", dtype=dtype if dtype != torch.float32 else torch.float32):
-            out = model(input_ids=enc_full["input_ids"].to("cuda"), labels=labels_ids.unsqueeze(0).to("cuda"))
-        return -float(out.loss.detach().cpu())
+    confusion = [[0, 0, 0, 0] for _ in labels]
 
-    for example in ds:  # type: ignore[union-attr]
+    for example in ds:
         if max_samples and total >= max_samples:
             break
-        question, ctx, label = _extract_pubmedqa_fields(example)
-        if label not in labels or not question:
+        question, options, gold_idx = _extract_medmcqa_fields(example)
+        if not question or len(options) != 4 or gold_idx is None or not options[gold_idx]:
             continue
-        prompt = f"Question: {question}\nContext: {ctx}\nAnswer:" if ctx else f"Question: {question}\nAnswer:"
-        scores = {ans: _score_answer(prompt, ans) for ans in labels}
-        pred = max(scores, key=scores.get)
+        prompt = (
+            f"Question: {question}\nChoices:"
+            f" (A) {options[0]} (B) {options[1]} (C) {options[2]} (D) {options[3]}\nAnswer:"
+        )
+        candidates = [f"{labels[i]}. {options[i]}" for i in range(4)]
+        scores = _score_candidates_logprob_sum(
+            model=model,
+            tokenizer=tokenizer,
+            prompt=prompt,
+            candidates=candidates,
+            dtype=dtype,
+        )
+        pred_idx = max(range(4), key=lambda idx: scores[candidates[idx]])
         total += 1
-        per_class[label]["total"] += 1
-        if pred == label:
+        confusion[gold_idx][pred_idx] += 1
+        gold_label = labels[gold_idx]
+        per_class[gold_label]["total"] += 1
+        if pred_idx == gold_idx:
             correct += 1
-            per_class[label]["correct"] += 1
+            per_class[gold_label]["correct"] += 1
     acc = float(correct) / total if total else float("nan")
     return {
         "accuracy": acc,
         "total": total,
-        "split": resolved_split,
+        "split": split,
         "per_class": {
             k: {
                 "accuracy": (v["correct"] / v["total"]) if v["total"] else float("nan"),
@@ -462,251 +413,10 @@ def evaluate_pubmedqa(
             }
             for k, v in per_class.items()
         },
-    }
-
-
-# ---------- New: Alternative classification-style evaluations ----------
-
-def _load_bioasq_yesno(split: str = "test") -> Optional[datasets.IterableDataset]:
-    """
-    Try several BigBio/BioASQ variants and return a streaming dataset of yes/no QA.
-    Returns None if none are available in the current environment.
-    """
-    trials: List[Tuple[str, Optional[str]]] = [
-        ("bigbio/bioasq", "yesno"),
-        ("bigbio/bioasq", None),
-        ("bigbio/bioasq_qa", None),
-    ]
-    for ds_name, cfg in trials:
-        try:
-            if cfg:
-                ds = datasets.load_dataset(ds_name, cfg, split=split, streaming=True)
-            else:
-                ds = datasets.load_dataset(ds_name, split=split, streaming=True)
-            logger.info("Loaded %s%s split=%s (streaming).", ds_name, f":{cfg}" if cfg else "", split)
-            return ds
-        except Exception as e:
-            logger.warning("BioASQ trial %s:%s failed: %s", ds_name, cfg, e)
-            continue
-    return None
-
-
-def _extract_bioasq_yesno_fields(example: Dict[str, Any]) -> Tuple[str, str]:
-    """
-    Extract (question, label) from BioASQ-like schema.
-    Returns empty strings when missing.
-    """
-    # BigBio variants differ; try common fields.
-    q = str(example.get("question") or example.get("body") or example.get("query") or "")
-    # Labels can be 'yes'/'no' or boolean; normalize to lowercase strings.
-    label = example.get("answer") or example.get("yesno") or example.get("label")
-    if isinstance(label, bool):
-        label = "yes" if label else "no"
-    label = str(label or "").strip().lower()
-    return q, label
-
-
-def evaluate_yesno(
-    *,
-    model_path: str,
-    tokenizer_path: str,
-    max_samples: int | None = 2000,
-    dataset: str = "bioasq",
-    score_method: str = "logprob_sum",
-) -> Dict[str, Any]:
-    """
-    Deterministic yes/no evaluation using label log-likelihood scoring.
-    If BioASQ is unavailable, falls back to PubMedQA filtered to {yes,no}.
-    """
-    if not torch.cuda.is_available():
-        raise RuntimeError("CUDA required for eval")
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    model = _load_model_with_fallbacks(model_path, tokenizer)
-    dtype = next(model.parameters()).dtype
-
-    labels = ["yes", "no"]
-    per_class = {k: {"correct": 0, "total": 0} for k in labels}
-    total = 0
-    correct = 0
-
-    ds: Optional[datasets.IterableDataset] = None
-    resolved = "test"
-    if dataset == "bioasq":
-        ds = _load_bioasq_yesno(split="test")
-        resolved = "test"
-    if ds is None:
-        # Fall back to PubMedQA train and filter {yes,no}
-        pub_ds, resolved = _try_load_pubmedqa_standard("test")
-        ds = pub_ds
-
-    def _score(prompt: str) -> str:
-        if score_method == "logprob_sum":
-            sc = _score_candidates_logprob_sum(
-                model=model, tokenizer=tokenizer, prompt=prompt, candidates=labels, dtype=dtype
-            )
-            return max(sc, key=sc.get)
-        else:
-            # Fallback to mean-loss (tie-break equivalent)
-            sc = _score_candidates_logprob_sum(
-                model=model, tokenizer=tokenizer, prompt=prompt, candidates=labels, dtype=dtype
-            )
-            return max(sc, key=sc.get)
-
-    for ex in ds:  # type: ignore[union-attr]
-        if max_samples and total >= max_samples:
-            break
-        q, y = _extract_bioasq_yesno_fields(ex)
-        if not q or y not in labels:
-            # Try PubMedQA extraction if BioASQ fields missing
-            try:
-                q2, ctx2, y2 = _extract_pubmedqa_fields(ex)
-                if y2 in labels and q2:
-                    q = q2 if not ctx2 else f"{q2}\nContext: {ctx2}"
-                    y = y2
-                else:
-                    continue
-            except Exception:
-                continue
-        prompt = f"Question: {q}\nAnswer:"
-        pred = _score(prompt)
-        total += 1
-        per_class[y]["total"] += 1
-        if pred == y:
-            correct += 1
-            per_class[y]["correct"] += 1
-
-    acc = float(correct) / total if total else float("nan")
-    return {
-        "accuracy": acc,
-        "total": total,
-        "split": resolved,
-        "per_class": {k: {"accuracy": (v["correct"] / v["total"]) if v["total"] else float("nan"), "total": v["total"]}
-                      for k, v in per_class.items()},
         "labels": labels,
+        "confusion_matrix": confusion,
     }
 
-
-def _try_load_medmcqa(split: str = "validation") -> Optional[datasets.IterableDataset]:
-    """
-    Try several MedMCQA variants; return streaming dataset or None.
-    """
-    trials: List[Tuple[str, Optional[str]]] = [
-        ("openlifescienceai/medmcqa", None),
-        ("medmcqa", None),
-        ("AI4Medicine/MedMCQA", None),
-    ]
-    for name, cfg in trials:
-        try:
-            if cfg:
-                ds = datasets.load_dataset(name, cfg, split=split, streaming=True)
-            else:
-                ds = datasets.load_dataset(name, split=split, streaming=True)
-            logger.info("Loaded %s%s split=%s (streaming).", name, f":{cfg}" if cfg else "", split)
-            return ds
-        except Exception as e:
-            logger.warning("MedMCQA trial %s:%s failed: %s", name, cfg, e)
-    return None
-
-
-def _extract_medmcqa_fields(example: Dict[str, Any]) -> Tuple[str, List[str], Optional[int]]:
-    """
-    Normalize MedMCQA example into (question, [A,B,C,D], correct_index or None)
-    """
-    q = str(example.get("question") or example.get("Q") or "")
-    # Common option keys: opa/opb/opc/opd or A/B/C/D
-    opts = []
-    for k in ("opa", "opb", "opc", "opd"):
-        if k in example:
-            opts = [str(example.get("opa") or ""), str(example.get("opb") or ""), str(example.get("opc") or ""), str(example.get("opd") or "")]
-            break
-    if not opts:
-        opts = [str(example.get("A") or ""), str(example.get("B") or ""), str(example.get("C") or ""), str(example.get("D") or "")]
-    # Answer may be letter or index
-    ans = example.get("cop") or example.get("answer") or example.get("label")
-    idx: Optional[int] = None
-    if isinstance(ans, str):
-        s = ans.strip().lower()
-        map_ltr = {"a": 0, "b": 1, "c": 2, "d": 3}
-        idx = map_ltr.get(s)
-        if idx is None:
-            # If answer equals the option text, match
-            try:
-                idx = opts.index(ans)
-            except Exception:
-                idx = None
-    elif isinstance(ans, int):
-        idx = ans if 0 <= ans <= 3 else None
-    return q, opts, idx
-
-
-def evaluate_mcq(
-    *,
-    model_path: str,
-    tokenizer_path: str,
-    max_samples: int | None = 2000,
-    dataset: str = "medmcqa",
-    score_method: str = "logprob_sum",
-) -> Dict[str, Any]:
-    """
-    Multiple-choice (A–D) evaluation with deterministic choice scoring.
-    """
-    if not torch.cuda.is_available():
-        raise RuntimeError("CUDA required for eval")
-    tok = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
-    if tok.pad_token is None:
-        tok.pad_token = tok.eos_token
-    model = _load_model_with_fallbacks(model_path, tok)
-    dtype = next(model.parameters()).dtype
-
-    ds = _try_load_medmcqa(split="validation") or _try_load_medmcqa(split="test") or _try_load_medmcqa(split="train")
-    if ds is None:
-        raise RuntimeError("Unable to load MedMCQA dataset in this environment.")
-
-    labels = ["A", "B", "C", "D"]
-    per_class = {k: {"correct": 0, "total": 0} for k in labels}
-    cm = [[0, 0, 0, 0] for _ in range(4)]
-    total = 0
-    correct = 0
-
-    def _score(prompt: str, options: List[str]) -> int:
-        # Score option letter prefixed to normalize style
-        candidates = [f"{labels[i]}. {opt}" for i, opt in enumerate(options)]
-        sc = _score_candidates_logprob_sum(
-            model=model, tokenizer=tok, prompt=prompt, candidates=candidates, dtype=dtype
-        )
-        # pick best by score
-        best = max(range(4), key=lambda i: sc[candidates[i]])
-        return best
-
-    for ex in ds:  # type: ignore[union-attr]
-        if max_samples and total >= max_samples:
-            break
-        q, options, gold_idx = _extract_medmcqa_fields(ex)
-        if not q or len(options) != 4 or gold_idx is None:
-            continue
-        prompt = f"Question: {q}\nChoices: (A) {options[0]} (B) {options[1]} (C) {options[2]} (D) {options[3]}\nAnswer:"
-        pred_idx = _score(prompt, options)
-        total += 1
-        cm[gold_idx][pred_idx] += 1
-        per_class[labels[gold_idx]]["total"] += 1
-        if pred_idx == gold_idx:
-            correct += 1
-            per_class[labels[gold_idx]]["correct"] += 1
-
-    acc = float(correct) / total if total else float("nan")
-    per_class_acc = {
-        k: {"accuracy": (v["correct"] / v["total"]) if v["total"] else float("nan"), "total": v["total"]}
-        for k, v in per_class.items()
-    }
-    return {
-        "accuracy": acc,
-        "total": total,
-        "labels": labels,
-        "per_class": per_class_acc,
-        "confusion_matrix": cm,
-    }
 
 
 def compute_term_tokenization_coverage(terms_path: str, tokenizer_path: str) -> Dict[str, Any]:
@@ -805,37 +515,20 @@ def parse_args() -> argparse.Namespace:
     )
     # PubMedQA options
     parser.add_argument(
-        "--run-pubmedqa",
+        "--run-medmcqa",
         action="store_true",
-        help="Run PubMedQA accuracy in addition to perplexity.",
+        help="Run MedMCQA accuracy in addition to perplexity.",
     )
     parser.add_argument(
         "--baseline-model",
         default="mistralai/Mistral-7B-v0.3",
-        help="Baseline model for PubMedQA (only used if --run-pubmedqa).",
+        help="Baseline model for MedMCQA (only used if --run-medmcqa).",
     )
     parser.add_argument(
-        "--pubmedqa-dataset",
-        default="auto",
-        choices=["auto", "bigbio", "standard"],
-        help="Dataset preference for PubMedQA.",
-    )
-    # New: Classification-style tasks
-    parser.add_argument(
-        "--eval-task",
-        choices=["ynm", "mcq"],
-        help="Alternative classification task to run (yes/no/maybe or multiple-choice).",
-    )
-    parser.add_argument(
-        "--eval-dataset",
-        choices=["bioasq", "pubmedqa", "medmcqa"],
-        help="Dataset to use for the alternative evaluation.",
-    )
-    parser.add_argument(
-        "--score-method",
-        default="logprob_sum",
-        choices=["logprob_sum", "loss_mean"],
-        help="Scoring method for classification-style evaluations.",
+        "--medmcqa-split",
+        default="validation",
+        choices=["train", "validation", "test"],
+        help="Split to use from openlifescienceai/medmcqa when running --run-medmcqa.",
     )
     parser.add_argument(
         "--log-missing",
@@ -894,79 +587,28 @@ def main() -> None:
         )
         results[f"{dataset_name}:{split}"] = {"perplexity": perplexity}
 
-    if args.run_pubmedqa:
+    if args.run_medmcqa:
         try:
-            baseline = evaluate_pubmedqa(
+            baseline = evaluate_medmcqa(
                 model_path=args.baseline_model,
                 tokenizer_path=args.baseline_model,
-                split="test",
+                split=args.medmcqa_split,
                 max_samples=None if args.max_samples <= 0 else args.max_samples,
-                dataset_preference=args.pubmedqa_dataset,
             )
-            adapted = evaluate_pubmedqa(
+            adapted = evaluate_medmcqa(
                 model_path=args.model,
                 tokenizer_path=args.tokenizer,
-                split="test",
+                split=args.medmcqa_split,
                 max_samples=None if args.max_samples <= 0 else args.max_samples,
-                dataset_preference=args.pubmedqa_dataset,
             )
-            results["pubmedqa"] = {
+            results["medmcqa"] = {
                 "baseline": baseline,
                 "adapted": adapted,
                 "delta": {"accuracy": adapted["accuracy"] - baseline["accuracy"]},
             }
         except Exception as qa_exc:
-            logger.warning("PubMedQA evaluation failed: %s", qa_exc)
-            results["pubmedqa"] = {"status": "error", "message": str(qa_exc)}
-
-    # New: Alternative evaluations (classification-style)
-    if args.eval_task:
-        try:
-            if args.eval_task == "ynm":
-                # yes/no (optionally maybe if dataset provides)
-                # Baseline
-                baseline = evaluate_yesno(
-                    model_path=args.baseline_model,
-                    tokenizer_path=args.baseline_model,
-                    max_samples=None if args.max_samples <= 0 else args.max_samples,
-                    dataset=args.eval_dataset or "bioasq",
-                    score_method=args.score_method,
-                )
-                adapted = evaluate_yesno(
-                    model_path=args.model,
-                    tokenizer_path=args.tokenizer,
-                    max_samples=None if args.max_samples <= 0 else args.max_samples,
-                    dataset=args.eval_dataset or "bioasq",
-                    score_method=args.score_method,
-                )
-                results["ynm"] = {
-                    "baseline": baseline,
-                    "adapted": adapted,
-                    "delta": {"accuracy": adapted["accuracy"] - baseline["accuracy"]},
-                }
-            elif args.eval_task == "mcq":
-                baseline = evaluate_mcq(
-                    model_path=args.baseline_model,
-                    tokenizer_path=args.baseline_model,
-                    max_samples=None if args.max_samples <= 0 else args.max_samples,
-                    dataset=args.eval_dataset or "medmcqa",
-                    score_method=args.score_method,
-                )
-                adapted = evaluate_mcq(
-                    model_path=args.model,
-                    tokenizer_path=args.tokenizer,
-                    max_samples=None if args.max_samples <= 0 else args.max_samples,
-                    dataset=args.eval_dataset or "medmcqa",
-                    score_method=args.score_method,
-                )
-                results["mcq"] = {
-                    "baseline": baseline,
-                    "adapted": adapted,
-                    "delta": {"accuracy": adapted["accuracy"] - baseline["accuracy"]},
-                }
-        except Exception as alt_exc:  # pragma: no cover
-            logger.warning("Alternative eval '%s' failed: %s", args.eval_task, alt_exc)
-            results[args.eval_task] = {"status": "error", "message": str(alt_exc)}
+            logger.warning("MedMCQA evaluation failed: %s", qa_exc)
+            results["medmcqa"] = {"status": "error", "message": str(qa_exc)}
 
     with open(args.output, "w", encoding="utf-8") as fp:
         json.dump(results, fp, indent=2)
