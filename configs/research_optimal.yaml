@@ -46,9 +46,9 @@ pipeline:
 
 vocab_adaptation:
   enabled: true
-  # Stage 1: Embeddings-only warmup with conservative LR for stability
+  # Stage 1: Embeddings-only warmup with balanced LR for stability and effectiveness
   stage1_steps: 2500
-  lr_stage1: 2e-5  # Optimized: Conservative LR for stability (vs paper's 6.4e-4)
+  lr_stage1: 5e-5  # Optimized: Balanced LR for stability and effective learning (vs paper's 6.4e-4)
   # Stage 2: Full model fine-tuning with LoRA for stability
   stage2_steps: 2500
   lr_stage2: 5.0e-5  # Standard for 7B models
