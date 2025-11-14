@@ -10,7 +10,10 @@ cd /lambda/nfs/med-align/med-align || exit 1
 
 # Log file with timestamp
 LOG_DIR="/lambda/nfs/med-align/tokenizer_adapt/logs"
-mkdir -p "$LOG_DIR"
+mkdir -p "$LOG_DIR" || {
+    echo "Failed to create log directory: $LOG_DIR"
+    exit 1
+}
 TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
 LOG_FILE="$LOG_DIR/pipeline_${TIMESTAMP}.log"
 
