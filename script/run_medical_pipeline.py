@@ -348,8 +348,30 @@ def main() -> None:
         },
     )
 
-    # Optional vocabulary adaptation (fine-tuning) before evaluation
+    # Optional embedding warm-up (lightweight: embeddings + LM head only)
     eval_model_path = stage_outputs["apply"]["model_dir"]
+    if bool(final_cfg.get("embedding_warmup", {}).get("enabled", False)):
+        def _run_embedding_warmup() -> Dict[str, str]:
+            dataset_path = stage_outputs.get("tokenize", {}).get("target_dataset")
+            if not dataset_path:
+                raise RuntimeError("Missing tokenized target dataset path for embedding warm-up.")
+            result = medical_pipeline.embedding_warmup(
+                run_dir=run_dir,
+                adapted_model_path=stage_outputs["apply"]["model_dir"],
+                dataset_path=str(dataset_path),
+                config=final_cfg["embedding_warmup"],
+            )
+            return result
+
+        stage_outputs["embedding_warmup"] = _retry(
+            "embedding_warmup",
+            final_cfg["pipeline"]["max_retries"],
+            final_cfg["pipeline"]["retry_backoff"],
+            _run_embedding_warmup,
+        )
+        eval_model_path = stage_outputs["embedding_warmup"].get("model_dir", eval_model_path)
+
+    # Optional vocabulary adaptation (fine-tuning) before evaluation
     if bool(final_cfg.get("vocab_adaptation", {}).get("enabled", True)):
         def _run_vocab_adaptation() -> Dict[str, str]:
             # Prefer the target tokenizer's dataset for adaptation
@@ -378,7 +400,8 @@ def main() -> None:
 
     eval_enabled = bool(final_cfg["evaluation"]["enabled"]) and not args.skip_eval
     eval_datasets = list(final_cfg["evaluation"]["datasets"] or [])
-    if eval_enabled and eval_datasets:
+    # Run evaluation if enabled and either datasets are provided OR QA evaluation is requested
+    if eval_enabled and (eval_datasets or bool(final_cfg["evaluation"].get("qa", False))):
         from src import eval_medical
 
         eval_output = run_dir / "evaluation.json"
@@ -389,6 +412,7 @@ def main() -> None:
             # Read recommended knobs from environment to avoid expanding CLI surface.
             eval_batch = int(os.getenv("TOKALIGN_EVAL_BATCH", "32"))
             eval_maxlen = int(os.getenv("TOKALIGN_EVAL_MAXLEN", "1024"))
+            # Perplexity evaluation on datasets (if provided)
             for dataset_item in eval_datasets:
                 dataset_name, dataset_config, split = eval_medical.parse_dataset_spec(dataset_item)
                 dataset_label = dataset_name if not dataset_config else f"{dataset_name}[{dataset_config}]"
@@ -410,7 +434,7 @@ def main() -> None:
                         max_length=eval_maxlen,
                     )
                 }
-            # Optional MedMCQA + coverage metrics
+            # Optional MedMCQA + coverage metrics (runs even if no datasets provided)
             if bool(final_cfg["evaluation"]["qa"]) or os.getenv("MEDICAL_EVAL_QA", "") == "1":
                 metrics_dir = run_dir / "metrics"
                 os.makedirs(metrics_dir, exist_ok=True)

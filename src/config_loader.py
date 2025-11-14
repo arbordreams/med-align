@@ -78,6 +78,17 @@ def get_default_config() -> Dict[str, Any]:
             "max_retries": 1,
             "retry_backoff": 5.0,
         },
+        "embedding_warmup": {
+            "enabled": False,
+            "steps": 2500,
+            "lr": 5e-5,
+            "batch_size": 4,
+            "gradient_accumulation": 8,
+            "max_seq_length": 2048,
+            "seed": 0,
+            "use_flash_attn": False,
+            "bf16": True,
+        },
         "vocab_adaptation": {
             "enabled": True,
             "stage1_steps": 2500,
@@ -192,6 +203,28 @@ def _validate_config_structure(cfg: Dict[str, Any]) -> None:
         raise ValueError("pipeline.max_retries must be an integer")
     if not isinstance(cfg["pipeline"].get("retry_backoff", 0.0), (int, float)):
         raise ValueError("pipeline.retry_backoff must be a number")
+
+    # embedding_warmup
+    ew = cfg.get("embedding_warmup", {})
+    if not isinstance(ew.get("enabled", False), bool):
+        raise ValueError("embedding_warmup.enabled must be a boolean")
+    if ew.get("enabled", False):
+        if not isinstance(ew.get("steps", 0), int):
+            raise ValueError("embedding_warmup.steps must be an integer")
+        if not isinstance(ew.get("lr", 0.0), (int, float)):
+            raise ValueError("embedding_warmup.lr must be a number")
+        if not isinstance(ew.get("batch_size", 0), int):
+            raise ValueError("embedding_warmup.batch_size must be an integer")
+        if not isinstance(ew.get("gradient_accumulation", 0), int):
+            raise ValueError("embedding_warmup.gradient_accumulation must be an integer")
+        if not isinstance(ew.get("max_seq_length", 0), int):
+            raise ValueError("embedding_warmup.max_seq_length must be an integer")
+        if not isinstance(ew.get("seed", 0), int):
+            raise ValueError("embedding_warmup.seed must be an integer")
+        if not isinstance(ew.get("use_flash_attn", False), bool):
+            raise ValueError("embedding_warmup.use_flash_attn must be a boolean")
+        if not isinstance(ew.get("bf16", True), bool):
+            raise ValueError("embedding_warmup.bf16 must be a boolean")
 
     # vocab_adaptation
     va = cfg["vocab_adaptation"]

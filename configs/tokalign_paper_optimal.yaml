@@ -1,0 +1,69 @@
+models:
+  source_tokenizer: "BioMistral/BioMistral-7B"
+  target_tokenizer: "mistralai/Mistral-7B-v0.3"
+  source_model: "BioMistral/BioMistral-7B"
+
+corpus:
+  size_gb: 10.0
+  byte_budget: 0   # 0 = derive from size_gb
+  deduplicate: true
+  hash_name: "sha256"
+
+term_mining:
+  top_k: 2000
+  min_frequency: 5  # Increased from 3 to focus on recurring medical concepts, filter noisy n-grams
+  use_tfidf: true
+
+embedding:
+  backend: "fasttext"
+  fasttext:
+    epochs: 30
+    mincount: 1
+    lr: 0.05
+    thread: null   # auto-scaled based on detected vCPUs
+
+alignment:
+  pivot_count: 2000
+  similarity_threshold: 0.4  # TokAlign paper uses relative representation with pivot tokens
+
+tokenization:
+  workers: null   # auto-scaled
+  cache_dir: null
+  min_line_length: 0
+
+evaluation:
+  enabled: true
+  datasets: []  # Perplexity evaluation datasets (MedMCQA is better for QA, see qa flag below)
+  max_samples: 1000
+  qa: true  # Enables MedMCQA evaluation (openlifescienceai/medmcqa, ~194k multiple-choice questions)
+  baseline_model: "mistralai/Mistral-7B-v0.3"
+
+pipeline:
+  run_root: "runs/tokenizer_adapt"
+  max_retries: 1
+  retry_backoff: 5.0
+
+embedding_warmup:
+  enabled: true  # Lightweight embedding-only warm-up after alignment
+  # TokAlign reports 30-60% perplexity reduction from this stage alone
+  # Trains only: embedding layer + LM head (freezes all transformer layers)
+  # Low cost: <1% of full fine-tuning, helps stabilize new medical tokens
+  steps: 3500  # 1-5k steps recommended (using 3500 for better convergence)
+  lr: 1e-4     # Increased from 5e-5 for stronger adaptation, closer to TokAlign perplexity reductions
+  batch_size: 4
+  gradient_accumulation: 8
+  max_seq_length: 2048
+  seed: 0
+  use_flash_attn: false  # Opt-in: enable if flash-attn is installed
+  bf16: true  # Better stability than fp16, good for GH200
+
+vocab_adaptation:
+  enabled: false  # Original TokAlign paper does NOT use full fine-tuning
+  # TokAlign core method: Alignment matrix + weight rearrangement + embedding warm-up
+  # The original paper does:
+  #   1. Train embeddings (FastText/GloVe)
+  #   2. Compute alignment matrix (cal_trans_matrix.py)
+  #   3. Initialize model weights via alignment (convert.py)
+  #   4. Optional: Embedding warm-up (embeddings + LM head only) - RECOMMENDED
+  # Full two-stage fine-tuning is an optional extension, not part of core method
+

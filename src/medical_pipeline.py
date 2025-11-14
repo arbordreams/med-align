@@ -504,6 +504,130 @@ def evaluate_alignment_bleu(
     return str(out_path)
 
 
+def embedding_warmup(
+    *,
+    run_dir: Path,
+    adapted_model_path: str,
+    dataset_path: str,
+    config: Dict[str, object],
+) -> Dict[str, str]:
+    """
+    Lightweight embedding-only warm-up stage after vocabulary alignment.
+    
+    Trains only embedding layer + LM head (~1-5k steps) while freezing all
+    transformer layers. This stabilizes new medical tokens, corrects embedding
+    drift, and improves similarity neighborhoods at low cost (<1% of full FT).
+    
+    TokAlign reports 30-60% perplexity reduction from this stage alone.
+    """
+    warmup_dir = run_dir / "embedding_warmup"
+    warmup_dir.mkdir(parents=True, exist_ok=True)
+
+    def _is_flash_attn_available() -> bool:
+        try:
+            import flash_attn  # type: ignore  # noqa: F401
+            return True
+        except Exception:
+            return False
+
+    # Extract config with explicit casting
+    steps = int(config.get("steps", 2500))  # type: ignore[arg-type]
+    lr = float(config.get("lr", 5e-5))  # type: ignore[arg-type]
+    batch_size = int(config.get("batch_size", 4))  # type: ignore[arg-type]
+    grad_acc = int(config.get("gradient_accumulation", 8))  # type: ignore[arg-type]
+    max_seq_length = int(config.get("max_seq_length", 2048))  # type: ignore[arg-type]
+    seed = int(config.get("seed", 0))  # type: ignore[arg-type]
+    use_flash_attn = bool(config.get("use_flash_attn", False)) and _is_flash_attn_available()
+    bf16_flag = bool(config.get("bf16", True))  # Default True for efficiency
+
+    logger.info(
+        "Embedding warm-up hyperparams: steps=%d lr=%s batch=%d grad_acc=%d "
+        "max_seq_len=%d bf16=%s",
+        steps,
+        lr,
+        batch_size,
+        grad_acc,
+        max_seq_length,
+        bf16_flag,
+    )
+
+    # Environment for GPU training
+    cuda_env: Dict[str, str] = {}
+    try:
+        import os as _os_env
+        if torch.cuda.is_available() and not _os_env.environ.get("CUDA_VISIBLE_DEVICES"):
+            cuda_env["CUDA_VISIBLE_DEVICES"] = "0"
+        if not _os_env.environ.get("PYTORCH_CUDA_ALLOC_CONF"):
+            cuda_env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+    except Exception:
+        pass
+
+    # Build training arguments - matching original vocab_adaptation Stage 1 exactly
+    # Use same structure as _common_args() from vocab_adaptation for consistency
+    warmup_args = [
+        sys.executable,
+        "-m",
+        "src.clm_train",
+        "--model_name",
+        adapted_model_path,
+        "--tokenizer_path",
+        adapted_model_path,
+        "--dataset_name",
+        dataset_path,
+        "--output_dir",
+        str(warmup_dir),
+        "--max_steps",
+        str(steps),
+        "--save_steps",
+        str(steps),
+        "--logging_steps",
+        "50",
+        "--learning_rate",
+        str(lr),
+        "--per_device_train_batch_size",
+        str(batch_size),
+        "--gradient_accumulation_steps",
+        str(grad_acc),
+        "--max_seq_length",
+        str(max_seq_length),
+        "--use_gradient_checkpointing",
+        "True",
+        "--bf16",
+        "True" if bf16_flag else "False",
+        "--packing",
+        "True",
+        "--lr_scheduler_type",
+        "cosine",
+        "--warmup_ratio",
+        "0.03",
+        "--weight_decay",
+        "0.01",
+        "--max_grad_norm",
+        "0.3",  # Same as default in clm_train.py ScriptArguments
+        "--ignore_data_skip",
+        "True",
+        "--seed",
+        str(seed),
+        "--finetune_embed_only",
+        "True",  # Only train embeddings + LM head (matches vocab_adaptation Stage 1)
+        "--train_start_idx",
+        "0",  # Same as vocab_adaptation Stage 1
+    ]
+    if use_flash_attn:
+        warmup_args.extend(["--use_flash_attn", "True"])
+
+    logger.info("Starting embedding warm-up (embeddings + LM head only) at %s.", warmup_dir)
+    _run_subprocess(warmup_args, env=cuda_env)
+
+    final_ckpt = warmup_dir / f"checkpoint-{steps}"
+    logger.info("Embedding warm-up completed. Final checkpoint: %s", final_ckpt)
+
+    return {
+        "model_dir": str(final_ckpt),
+        "warmup_dir": str(warmup_dir),
+    }
+
+
 def vocab_adaptation(
     *,
     run_dir: Path,

@@ -302,10 +302,12 @@ def main(args):
     except Exception:
         pass
 
-    # remove the gradient of non-embedding
+    # remove the gradient of non-embedding and non-LM-head parameters
+    # This trains: embedding layer (model.embed_tokens) + LM head (model.lm_head)
+    # Freezes: all transformer layers (attention, MLP, etc.)
     if args.finetune_embed_only:
         for name, param in model.named_parameters():
-            if "embed" not in name:
+            if "embed" not in name and "lm_head" not in name:
                 param.requires_grad = False
 
     callbacks = None
@@ -385,14 +387,14 @@ def main(args):
             need_shard = not os.path.exists(shard_index_path)
             if need_shard and os.path.isfile(shard_script_path):
                 # Run in a subprocess to avoid interference from accelerators.
-        subprocess.run(
-            [
-                "python",
+                subprocess.run(
+                    [
+                        "python",
                         shard_script_path,
-                f"--output_dir={args.output_dir}",
-            ],
-            check=True,
-        )
+                        f"--output_dir={args.output_dir}",
+                    ],
+                    check=True,
+                )
             else:
                 print("Skipping checkpoint sharding; shards already present or shard script missing.")
         except Exception as _e:
