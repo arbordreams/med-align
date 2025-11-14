@@ -211,6 +211,8 @@ def _validate_config_structure(cfg: Dict[str, Any]) -> None:
     if ew.get("enabled", False):
         if not isinstance(ew.get("steps", 0), int):
             raise ValueError("embedding_warmup.steps must be an integer")
+        # Tolerate scientific-notation strings in learning rates by coercing them to float
+        ew["lr"] = _coerce_to_float_if_numeric_str(ew.get("lr", 0.0))
         if not isinstance(ew.get("lr", 0.0), (int, float)):
             raise ValueError("embedding_warmup.lr must be a number")
         if not isinstance(ew.get("batch_size", 0), int):
