@@ -168,18 +168,24 @@ def main() -> None:
         final_cfg["corpus"]["byte_budget"] = int(float(final_cfg["corpus"]["size_gb"]) * 1_073_741_824)
 
     # Auto-scale workers/thread when explicitly null in config
+    # Detect actual vCPU count (prefer os.cpu_count() over environment variable)
+    try:
+        import os
+        detected_vcpus = os.cpu_count() or int(os.environ.get("OMP_NUM_THREADS", "24"))
+    except (ValueError, TypeError, AttributeError):
+        detected_vcpus = 24
+    
     if final_cfg["tokenization"].get("workers", None) is None:
         try:
-            num_vcpus = int(os.environ.get("OMP_NUM_THREADS", "24"))
-            optimal_workers = int(num_vcpus * 3 / 4) if num_vcpus >= 48 else num_vcpus
+            optimal_workers = int(detected_vcpus * 3 / 4) if detected_vcpus >= 48 else detected_vcpus
             optimal_workers = min(optimal_workers, 64)
             final_cfg["tokenization"]["workers"] = max(optimal_workers, 24) if args.research_mode else max(optimal_workers, 8)
         except (ValueError, TypeError):
             final_cfg["tokenization"]["workers"] = 24 if args.research_mode else 8
     if final_cfg["embedding"]["fasttext"].get("thread", None) is None:
         try:
-            num_vcpus = int(os.environ.get("OMP_NUM_THREADS", "24"))
-            final_cfg["embedding"]["fasttext"]["thread"] = max(int(num_vcpus / 2), 8)
+            # For FastText: use half of vCPUs per worker (2 workers = all vCPUs)
+            final_cfg["embedding"]["fasttext"]["thread"] = max(int(detected_vcpus / 2), 8)
         except (ValueError, TypeError):
             final_cfg["embedding"]["fasttext"]["thread"] = 12 if args.research_mode else 8
 
