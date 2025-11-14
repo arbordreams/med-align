@@ -41,4 +41,13 @@ Verification checklist for YAML configuration system
   OMP_NUM_THREADS=64 python script/run_medical_pipeline.py --config configs/research.yaml --input /path/to/corpus.jsonl --show-config
 - Expect: tokenization.workers auto-scales (<=64), fasttext.thread ≈ OMP_NUM_THREADS/2.
 
+9) Dataset spec parser (`dataset[config]:split`)
+- Command:
+  python src/eval_medical.py \
+    --model runs/tokenizer_adapt/<timestamp>/adapted_model \
+    --tokenizer runs/tokenizer_adapt/<timestamp>/tokenizers/target \
+    --dataset "pubmed_qa[pqa_labeled]:validation" \
+    --output /tmp/pubmedqa_eval.json
+- Expect: evaluator loads the requested config/split without falling back to other splits and reports a clear error if the split is missing.
+
 

@@ -2,6 +2,7 @@ import scipy.sparse
 from scipy.sparse import coo_matrix, csr_matrix, lil_matrix
 import json
 import torch
+from pathlib import Path
 from transformers import AutoTokenizer, AutoModelForCausalLM, set_seed
 import random
 import argparse
@@ -80,7 +81,13 @@ def trans2switch(
         hid_dim = src_embed.shape[1]
 
         src_len = src_embed.shape[0]
-        tgt_len = len(list(trans.keys()))
+        tgt_len = len(tgt_tok)
+        mapping_entries = len(trans) if isinstance(trans, dict) else len(list(trans))
+        if mapping_entries != tgt_len:
+            print(
+                f"[convert] Alignment matrix entries={mapping_entries} differ from target tokenizer length={tgt_len}. "
+                "Missing rows will be zero-initialized."
+            )
 
         dtype = src_embed.dtype
         tgt_embed = torch.zeros((tgt_len, hid_dim), dtype=dtype)
@@ -115,6 +122,8 @@ def trans2switch(
                 f"[convert] Initialized {len(missing_targets)} target tokens with zeros because they mapped "
                 f"outside the source vocabulary (max index {src_len - 1}). First few: {missing_targets[:10]}"
             )
+        else:
+            print("[convert] All target tokens mapped to source embeddings.")
 
         print(f"[convert] Finalizing model with target vocab size {tgt_len}...")
         # Resize token embeddings first, then copy weights directly to modules
@@ -131,6 +140,15 @@ def trans2switch(
             src_model.load_state_dict(state, strict=False)
         src_model.save_pretrained(tgt_clm_path)
         tgt_tok.save_pretrained(tgt_clm_path)
+        summary = {
+            "source_vocab": src_len,
+            "target_vocab": tgt_len,
+            "mapped": tgt_len - len(missing_targets),
+            "zero_initialized": len(missing_targets),
+        }
+        summary_path = Path(tgt_clm_path) / "tokalign_alignment_summary.json"
+        summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        print(f"[convert] Alignment summary written to {summary_path}")
 
 def random_permute(
     src_clm_path="./data/pythia-1b",

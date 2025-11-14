@@ -26,7 +26,7 @@ try:  # optional stopwords without hard dependency
     from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS as _STOPWORDS  # type: ignore
 except Exception:  # pragma: no cover
     _STOPWORDS = set()  # minimal fallback
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AddedToken
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +139,7 @@ def augment_tokenizer(
 
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
     existing_vocab = set(tokenizer.get_vocab().keys())
+    special_tokens = set(tokenizer.all_special_tokens or [])
 
     sanitized_terms: List[str] = []
     skipped_terms: List[str] = []
@@ -146,21 +147,38 @@ def augment_tokenizer(
         stripped = term.strip()
         if not stripped:
             continue
+        if stripped in special_tokens:
+            skipped_terms.append(stripped)
+            continue
         if stripped in existing_vocab or stripped in sanitized_terms:
             skipped_terms.append(stripped)
             continue
         sanitized_terms.append(stripped)
 
-    # SentencePiece-friendly: prefix tokens with ▁ to increase match rate on spm tokenizers.
+    # SentencePiece / LLaMA / Mistral tokenizers rely on an implicit whitespace prefix.
+    # Instead of injecting a literal ▁ (U+2581) which never matches raw text, rely on
+    # AddedToken with lstrip=True so occurrences of " term" map to the new entry.
     sp_like = any(k in tokenizer.__class__.__name__.lower() for k in ("llama", "mistral"))
-    sp_terms: List[str] = []
-    for term in sanitized_terms:
-        if sp_like and not term.startswith("▁"):
-            sp_terms.append("▁" + term)
-        else:
-            sp_terms.append(term)
-    if sp_terms:
-        tokenizer.add_tokens(sp_terms)
+    added_entries: List[str | AddedToken] = []
+
+    if sp_like:
+        for term in sanitized_terms:
+            added_entries.append(
+                AddedToken(term, lstrip=True, rstrip=False, normalized=False)
+            )
+    else:
+        added_entries = sanitized_terms.copy()
+
+    if added_entries:
+        original_size = len(tokenizer)
+        tokenizer.add_tokens(added_entries)
+        new_size = len(tokenizer)
+        logger.info(
+            "Tokenizer vocabulary grew from %d to %d (+%d).",
+            original_size,
+            new_size,
+            new_size - original_size,
+        )
     else:
         logger.info("No new terms to add; tokenizer vocabulary remains unchanged.")
 

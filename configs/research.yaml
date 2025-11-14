@@ -53,7 +53,7 @@ vocab_adaptation:
   batch_size: 4
   gradient_accumulation: 16
   max_seq_length: 2048
-  train_start_idx_stage2: 2560000
+  train_start_idx_stage2: 2560000   # Large corpus: skip early tokens to decorrelate Stage 2 from Stage 1
   seed: 0
   use_flash_attn: false  # Opt-in: enable if flash-attn is installed (often fails on ARM64/GH200)
   bf16: false

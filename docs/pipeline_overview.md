@@ -30,3 +30,12 @@ flag so that the original parallel behaviour stays available:
 Each modified script contains inline comments that highlight the new branching
 logic, making it clear where to plug in additional domain-specific steps while
 keeping the upstream workflow intact.
+
+## Evaluation and diagnostics
+
+- `src/eval_medical.py` accepts dataset specs of the form `dataset_id[config]:split`.
+  Use this to target gated configs like `pubmed_qa[pqa_labeled]:validation`
+  without editing the evaluator.
+- `script/tokenizer_term_diagnostics.py` provides a quick way to compare how
+  mined medical terms tokenize before and after augmentation. This is useful for
+  debugging vocabulary changes without rerunning the full pipeline.

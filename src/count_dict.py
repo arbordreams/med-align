@@ -1,6 +1,5 @@
 import json
 from transformers import AutoTokenizer
-import numpy as np
 import argparse
 
 def read_vocab_from_file(tok_config_path):
@@ -11,7 +10,8 @@ def read_vocab_from_file(tok_config_path):
 
 def read_vocab(tok_path):
     tok = AutoTokenizer.from_pretrained(tok_path)
-    return tok.vocab
+    vocab = tok.get_vocab()
+    return vocab
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

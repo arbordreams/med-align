@@ -139,7 +139,7 @@ Logs are written under `runs/logs/` and a roll-up summary can be found in
 
 You can drive the entire pipeline via YAML configs. Presets live under `configs/`:
 
-- `configs/ultra_quick_demo.yaml` — ultra-fast demo (~5MB corpus, very fast settings)
+- `configs/ultra_quick_demo.yaml` — ultra-fast demo (~5MB corpus, very fast settings). Intended for smoke tests/CI only; the adaptation stages run for just a few steps and the resulting metrics are **not** representative.
 - `configs/research.yaml` — quality-first defaults (5GB, TF-IDF, 2000 pivots)
 
 
@@ -272,7 +272,13 @@ bash script/init_model.sh
 
 The medical pipeline ships with a lightweight perplexity evaluator that accepts
 Hugging Face datasets. When datasets are not yet available the script records a
-placeholder requesting the required benchmark names.
+placeholder requesting the required benchmark names. Dataset specs follow the
+format `dataset_id[config]:split` where both `[config]` and `:split` are optional.
+
+Examples:
+
+- `uiyunkim-hub/pubmed-abstract:train`
+- `pubmed_qa[pqa_labeled]:validation`
 
 ```
 python src/eval_medical.py \
@@ -291,12 +297,31 @@ MedMCQA accuracy and coverage metrics:
 python -m src.eval_medical \
   --model runs/tokenizer_adapt/<timestamp>/vocab_adaptation/stage2_full/checkpoint-<steps> \
   --tokenizer runs/tokenizer_adapt/<timestamp>/vocab_adaptation/stage2_full/checkpoint-<steps> \
-  --dataset uiyunkim-hub/pubmed-abstract:train \
+  --dataset "uiyunkim-hub/pubmed-abstract:train" \
   --max-samples 1000 \
   --run-medmcqa \
   --baseline-model mistralai/Mistral-7B-v0.3 \
   --medmcqa-split validation \
   --output runs/tokenizer_adapt/<timestamp>/metrics/medical_eval.json
+- Coverage metrics compare the augmented tokenizer against the baseline to highlight the effect of vocabulary adaptation.
+- The `dataset` flag accepts the `[config]:split` syntax described above. Omit `[config]` for datasets without sub-configs.
+### Tokenizer diagnostics
+
+Need to confirm that mined medical terms produce meaningful tokens before
+running the full pipeline? Use the lightweight helper to compare baseline versus
+augmented tokenizers:
+
+```
+python script/tokenizer_term_diagnostics.py \
+  --baseline mistralai/Mistral-7B-v0.3 \
+  --candidate runs/tokenizer_adapt/<timestamp>/tokenizers/target \
+  --terms runs/tokenizer_adapt/<timestamp>/corpus/medical_terms.txt \
+  --limit 25
+```
+
+The script prints token sequences for each term and reports the average length /
+single-token ratio for both tokenizers, making it easy to sanity-check tokenizer
+augmentation without rerunning the rest of the pipeline.
 ```
 
 ### Expected gains with medical alignment

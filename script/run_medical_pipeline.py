@@ -384,17 +384,21 @@ def main() -> None:
             eval_batch = int(os.getenv("TOKALIGN_EVAL_BATCH", "32"))
             eval_maxlen = int(os.getenv("TOKALIGN_EVAL_MAXLEN", "1024"))
             for dataset_item in eval_datasets:
-                if ":" in dataset_item:
-                    dataset_name, split = dataset_item.split(":", maxsplit=1)
-                else:
-                    dataset_name, split = dataset_item, "test"
-                LOGGER.info("Evaluating %s:%s", dataset_name, split)
-                results[f"{dataset_name}:{split}"] = {
+                dataset_name, dataset_config, split = eval_medical.parse_dataset_spec(dataset_item)
+                dataset_label = dataset_name if not dataset_config else f"{dataset_name}[{dataset_config}]"
+                LOGGER.info(
+                    "Evaluating %s:%s (config=%s)",
+                    dataset_name,
+                    split,
+                    dataset_config or "-",
+                )
+                results[f"{dataset_label}:{split}"] = {
                     "perplexity": eval_medical.evaluate_perplexity(
                         model_path=eval_model_path,
                         tokenizer_path=eval_tokenizer,
                         dataset_name=dataset_name,
                         split=split,
+                        dataset_config=dataset_config,
                         max_samples=None if int(final_cfg["evaluation"]["max_samples"]) <= 0 else int(final_cfg["evaluation"]["max_samples"]),
                         batch_size=eval_batch,
                         max_length=eval_maxlen,

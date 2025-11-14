@@ -350,6 +350,34 @@ def train_embeddings_and_align(
         str(vocab_count_path),
     ]
     _run_subprocess(cmd)
+    mapped_targets = None
+    try:
+        with open(vocab_count_path, "r", encoding="utf-8") as fp:
+            vocab_mapping = json.load(fp)
+        if isinstance(vocab_mapping, dict):
+            mapped_targets = len([v for v in vocab_mapping.values() if v is not None])
+        elif isinstance(vocab_mapping, list):
+            mapped_targets = len(vocab_mapping)
+    except Exception as mapping_exc:  # pragma: no cover
+        logger.warning("Unable to inspect vocab mapping coverage: %s", mapping_exc)
+    else:
+        if mapped_targets is not None and target_vocab_size:
+            coverage = mapped_targets / target_vocab_size
+            if coverage > 1.0:
+                logger.warning(
+                    "Vocabulary mapping reported coverage %.3f (>1.0). "
+                    "Check that tokenizer lengths and mappings align. (mapped=%d target=%d)",
+                    coverage,
+                    mapped_targets,
+                    target_vocab_size,
+                )
+            else:
+                logger.info(
+                    "Vocabulary mapping coverage: %d/%d (%.2f%%).",
+                    mapped_targets,
+                    target_vocab_size,
+                    coverage * 100.0,
+                )
 
     align_matrix_path = align_dir / "align_matrix.json"
     gold_mapping = gold_mapping_path or str(vocab_count_path)
@@ -357,9 +385,15 @@ def train_embeddings_and_align(
     try:
         source_tok = AutoTokenizer.from_pretrained(tokenizer_source, trust_remote_code=True)
         target_tok = AutoTokenizer.from_pretrained(tokenizer_target, trust_remote_code=True)
-        source_vocab_size = int(getattr(source_tok, "vocab_size", None) or len(source_tok))
-        target_vocab_size = int(getattr(target_tok, "vocab_size", None) or len(target_tok))
-        logger.info("Tokenizer vocab sizes: source=%d, target=%d", source_vocab_size, target_vocab_size)
+        source_vocab_size = int(len(source_tok))
+        target_vocab_size = int(len(target_tok))
+        logger.info(
+            "Tokenizer vocab sizes (len) source=%d (reported=%s) target=%d (reported=%s)",
+            source_vocab_size,
+            getattr(source_tok, "vocab_size", None),
+            target_vocab_size,
+            getattr(target_tok, "vocab_size", None),
+        )
     except Exception as tok_exc:  # pragma: no cover
         logger.warning(
             "Failed to load tokenizers to infer vocab sizes (%s). Falling back to 32768 for both.",
@@ -517,6 +551,22 @@ def vocab_adaptation(
     # Match config default (False) and enable only if available
     use_flash_attn = bool(config.get("use_flash_attn", False)) and _is_flash_attn_available()
     bf16_flag = bool(config.get("bf16", False))
+
+    logger.info(
+        "Vocab adaptation hyperparams: stage1=%d steps (lr=%s) stage2=%d steps (lr=%s, start_idx=%d, optim=%s, lora=%s) "
+        "batch=%d grad_acc=%d max_seq_len=%d bf16=%s",
+        stage1_steps,
+        lr_stage1,
+        stage2_steps,
+        lr_stage2,
+        train_start_idx_stage2,
+        stage2_optimizer,
+        stage2_use_lora,
+        batch_size,
+        grad_acc,
+        max_seq_length,
+        bf16_flag,
+    )
 
     # Proceed without explicit GPU gate; environment is expected to provide GPU.
 

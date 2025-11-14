@@ -25,11 +25,35 @@ DEFAULT_DATASETS: List[str] = ["uiyunkim-hub/pubmed-abstract:train"]
 logger = logging.getLogger(__name__)
 
 
+def parse_dataset_spec(spec: str) -> Tuple[str, Optional[str], str]:
+    """
+    Parse dataset strings of the form "dataset[config]:split".
+    The config segment is optional; split defaults to "test".
+    """
+    dataset_part = spec
+    split = "test"
+    if ":" in spec:
+        dataset_part, split = spec.split(":", maxsplit=1)
+    dataset_part = dataset_part.strip()
+    split = split.strip() or "test"
+
+    config: Optional[str] = None
+    if "[" in dataset_part and dataset_part.endswith("]"):
+        name_part, config_part = dataset_part[:-1].split("[", maxsplit=1)
+        dataset_part = name_part.strip()
+        config = config_part.strip()
+
+    if not dataset_part:
+        raise ValueError(f"Invalid dataset specification '{spec}' (missing name).")
+    return dataset_part, (config or None), split
+
+
 def evaluate_perplexity(
     model_path: str,
     tokenizer_path: str,
     dataset_name: str,
     split: str,
+    dataset_config: Optional[str] = None,
     max_samples: int | None = None,
     batch_size: int = 32,
     max_length: int = 1024,
@@ -112,30 +136,29 @@ def evaluate_perplexity(
     first_param = next(model.parameters())
     active_dtype = first_param.dtype
 
-    # Use streaming to avoid downloading entire large datasets. Fall back if split is missing.
-    def _try_load(name: str, sp: str):
-        return datasets.load_dataset(name, split=sp, streaming=True)
-
-    ds = None
+    # Use streaming to avoid downloading entire large datasets.
     try:
-        ds = _try_load(dataset_name, split)
-    except Exception:
-        # Fallback order: validation -> train
-        for fallback_split in ("validation", "train"):
-            try:
-                logger.warning(
-                    "Requested split '%s' unavailable for %s; falling back to '%s'.",
-                    split,
-                    dataset_name,
-                    fallback_split,
-                )
-                ds = _try_load(dataset_name, fallback_split)
-                split = fallback_split
-                break
-            except Exception:
-                continue
-        if ds is None:
-            raise
+        ds = datasets.load_dataset(
+            dataset_name,
+            name=dataset_config,
+            split=split,
+            streaming=True,
+        )
+    except Exception as load_exc:
+        available = None
+        try:
+            available = datasets.get_dataset_split_names(dataset_name, dataset_config)
+        except Exception:
+            pass
+        detail = (
+            f"Available splits: {available}"
+            if available
+            else f"Original error: {load_exc}"
+        )
+        raise RuntimeError(
+            f"Unable to load dataset '{dataset_name}' (config={dataset_config or 'default'}) "
+            f"split '{split}'. {detail}"
+        ) from load_exc
 
     losses: List[float] = []
     count = 0
@@ -225,6 +248,14 @@ def evaluate_perplexity(
 
     avg_loss = sum(losses) / len(losses)
     perplexity = float(torch.exp(torch.tensor(avg_loss)))
+    logger.info(
+        "Perplexity evaluation finished: dataset=%s config=%s split=%s samples=%d dtype=%s",
+        dataset_name,
+        dataset_config or "-",
+        split,
+        count,
+        active_dtype,
+    )
     return perplexity
 
 
@@ -571,21 +602,25 @@ def main() -> None:
 
     results: Dict[str, Any] = {}
     for dataset_item in datasets_to_evaluate:
-        if ":" in dataset_item:
-            dataset_name, split = dataset_item.split(":", maxsplit=1)
-        else:
-            dataset_name, split = dataset_item, "test"
-        logger.info("Evaluating dataset %s split %s.", dataset_name, split)
+        dataset_name, dataset_config, split = parse_dataset_spec(dataset_item)
+        label = dataset_name if not dataset_config else f"{dataset_name}[{dataset_config}]"
+        logger.info(
+            "Evaluating dataset %s split %s (config=%s).",
+            dataset_name,
+            split,
+            dataset_config or "-",
+        )
         perplexity = evaluate_perplexity(
             model_path=args.model,
             tokenizer_path=args.tokenizer,
             dataset_name=dataset_name,
             split=split,
+            dataset_config=dataset_config,
             max_samples=None if args.max_samples <= 0 else args.max_samples,
             batch_size=args.batch_size,
             max_length=args.max_length,
         )
-        results[f"{dataset_name}:{split}"] = {"perplexity": perplexity}
+        results[f"{label}:{split}"] = {"perplexity": perplexity}
 
     if args.run_medmcqa:
         try:

@@ -33,6 +33,7 @@ tokenization:
   min_line_length: 0
 
 # TokAlign vocabulary adaptation (two-stage fine-tune)
+# NOTE: This preset is for smoke tests / CI only; qualitative metrics are not meaningful.
 vocab_adaptation:
   enabled: true
   stage1_steps: 10   # Minimal for smoke test

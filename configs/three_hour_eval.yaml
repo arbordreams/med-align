@@ -41,7 +41,7 @@ vocab_adaptation:
   batch_size: 2
   gradient_accumulation: 16
   max_seq_length: 1024
-  train_start_idx_stage2: 256000
+  train_start_idx_stage2: 0        # Use full 1GB corpus; no offset needed for this run
   stage2_use_lora: true
   stage2_optimizer: "adafactor"
   lora_r: 64
