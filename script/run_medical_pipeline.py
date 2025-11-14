@@ -476,6 +476,75 @@ def main() -> None:
                     results["medical_eval"] = {"results_path": str(medical_eval_out), **medical_eval}
                 except Exception as cov_exc:  # pragma: no cover
                     LOGGER.warning("Coverage metrics skipped/failed: %s", cov_exc)
+            # Optional alternative evaluations (classification-style)
+            try:
+                alt_cfg = final_cfg.get("evaluation_alt", {}) or {}
+                if alt_cfg:
+                    from src import eval_medical as _alt_eval
+                    metrics_dir = run_dir / "metrics"
+                    os.makedirs(metrics_dir, exist_ok=True)
+                    alt_max = int(alt_cfg.get("max_samples", final_cfg["evaluation"].get("max_samples", 1000)))
+                    baseline_model = str(final_cfg["evaluation"].get("baseline_model", "mistralai/Mistral-7B-v0.3"))
+                    # Yes/No (BioASQ)
+                    if bool(alt_cfg.get("ynm_bioasq", False)):
+                        ynm_out = metrics_dir / "ynm_bioasq.json"
+                        try:
+                            baseline = _alt_eval.evaluate_yesno(
+                                model_path=baseline_model,
+                                tokenizer_path=baseline_model,
+                                max_samples=alt_max,
+                                dataset="bioasq",
+                                score_method="logprob_sum",
+                            )
+                            adapted = _alt_eval.evaluate_yesno(
+                                model_path=eval_model_path,
+                                tokenizer_path=eval_tokenizer,
+                                max_samples=alt_max,
+                                dataset="bioasq",
+                                score_method="logprob_sum",
+                            )
+                            ynm = {
+                                "baseline": baseline,
+                                "adapted": adapted,
+                                "delta": {"accuracy": adapted["accuracy"] - baseline["accuracy"]},
+                            }
+                            with open(ynm_out, "w", encoding="utf-8") as fp:
+                                json.dump(ynm, fp, indent=2)
+                            results["ynm_bioasq"] = {"results_path": str(ynm_out), **ynm}
+                        except Exception as _ynm_exc:
+                            LOGGER.warning("YNM BioASQ eval failed: %s", _ynm_exc)
+                            results["ynm_bioasq"] = {"status": "error", "message": str(_ynm_exc)}
+                    # MedMCQA
+                    if bool(alt_cfg.get("mcq_medmcqa", False)):
+                        mcq_out = metrics_dir / "mcq_medmcqa.json"
+                        try:
+                            baseline = _alt_eval.evaluate_mcq(
+                                model_path=baseline_model,
+                                tokenizer_path=baseline_model,
+                                max_samples=alt_max,
+                                dataset="medmcqa",
+                                score_method="logprob_sum",
+                            )
+                            adapted = _alt_eval.evaluate_mcq(
+                                model_path=eval_model_path,
+                                tokenizer_path=eval_tokenizer,
+                                max_samples=alt_max,
+                                dataset="medmcqa",
+                                score_method="logprob_sum",
+                            )
+                            mcq = {
+                                "baseline": baseline,
+                                "adapted": adapted,
+                                "delta": {"accuracy": adapted["accuracy"] - baseline["accuracy"]},
+                            }
+                            with open(mcq_out, "w", encoding="utf-8") as fp:
+                                json.dump(mcq, fp, indent=2)
+                            results["mcq_medmcqa"] = {"results_path": str(mcq_out), **mcq}
+                        except Exception as _mcq_exc:
+                            LOGGER.warning("MedMCQA eval failed: %s", _mcq_exc)
+                            results["mcq_medmcqa"] = {"status": "error", "message": str(_mcq_exc)}
+            except Exception as _alt:
+                LOGGER.warning("Alternative evaluation block skipped/failed: %s", _alt)
             with open(eval_output, "w", encoding="utf-8") as fp:
                 json.dump(results, fp, indent=2)
             return {

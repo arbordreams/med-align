@@ -633,8 +633,8 @@ def vocab_adaptation(
                 str(lora_dropout),
                 "--lora_target_modules",
                 lora_target_modules,
-            ]
-        )
+        ]
+    )
     logger.info("Starting vocabulary adaptation Stage 2 (full-model) at %s.", stage2_dir)
     _run_subprocess(stage2_args, env=cuda_env)
 

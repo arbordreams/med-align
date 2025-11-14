@@ -385,14 +385,14 @@ def main(args):
             need_shard = not os.path.exists(shard_index_path)
             if need_shard and os.path.isfile(shard_script_path):
                 # Run in a subprocess to avoid interference from accelerators.
-                subprocess.run(
-                    [
-                        "python",
+        subprocess.run(
+            [
+                "python",
                         shard_script_path,
-                        f"--output_dir={args.output_dir}",
-                    ],
-                    check=True,
-                )
+                f"--output_dir={args.output_dir}",
+            ],
+            check=True,
+        )
             else:
                 print("Skipping checkpoint sharding; shards already present or shard script missing.")
         except Exception as _e:
