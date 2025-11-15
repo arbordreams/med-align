@@ -5,6 +5,8 @@
 RUN_DIR="${1:-/lambda/nfs/med-align/tokenizer_adapt/tokalign_paper_optimal_20251114-114334}"
 NUM_SAMPLES="${2:-10000}"
 
+export RUN_DIR NUM_SAMPLES
+
 cd /lambda/nfs/med-align/med-align && python3 << PYEOF
 from pathlib import Path
 import sys
@@ -15,8 +17,10 @@ from datasets import load_from_disk
 import json
 import statistics
 import random
+import os
 
-run_dir = Path('${RUN_DIR}')
+run_dir = Path(os.environ.get('RUN_DIR', '/lambda/nfs/med-align/tokenizer_adapt/tokalign_paper_optimal_20251114-114334'))
+num_samples = int(os.environ.get('NUM_SAMPLES', '10000'))
 model_path = run_dir / 'embedding_warmup' / 'checkpoint-3500'
 baseline_tokenizer = 'mistralai/Mistral-7B-v0.3'
 
@@ -31,7 +35,7 @@ print()
 print(f'Run directory: {run_dir}')
 print(f'Baseline: {baseline_tokenizer}')
 print(f'Adapted: {model_path}')
-print(f'Number of samples: {NUM_SAMPLES:,}')
+print(f'Number of samples: {num_samples:,}')
 print()
 
 # Load tokenizers
@@ -59,7 +63,7 @@ if corpus_file.exists():
     texts = []
     with open(corpus_file, 'r', encoding='utf-8', errors='replace') as f:
         for i, line in enumerate(f):
-            if i >= int('${NUM_SAMPLES}'):
+            if i >= num_samples:
                 break
             try:
                 doc = json.loads(line.strip())
@@ -93,7 +97,7 @@ else:
 if texts is None:
     print('Decoding text from tokenized dataset...')
     texts = []
-    sample_indices = random.sample(range(len(target_ds['train'])), min(int('${NUM_SAMPLES}'), len(target_ds['train'])))
+    sample_indices = random.sample(range(len(target_ds['train'])), min(num_samples, len(target_ds['train'])))
     for idx in sample_indices:
         try:
             # Decode using adapted tokenizer (should be close to original)
