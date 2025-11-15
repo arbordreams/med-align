@@ -34,7 +34,7 @@ tokenization:
 evaluation:
   enabled: true
   datasets: []  # Perplexity evaluation datasets (MedMCQA is better for QA, see qa flag below)
-  max_samples: 1000
+  max_samples: 10000  # Increased from 1000 for better statistical significance
   qa: true  # Enables MedMCQA evaluation (openlifescienceai/medmcqa, ~194k multiple-choice questions)
   baseline_model: "mistralai/Mistral-7B-v0.3"
 
