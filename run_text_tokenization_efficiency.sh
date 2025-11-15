@@ -3,7 +3,7 @@
 # Usage: ./run_text_tokenization_efficiency.sh [RUN_DIR] [NUM_SAMPLES]
 
 RUN_DIR="${1:-/lambda/nfs/med-align/tokenizer_adapt/tokalign_paper_optimal_20251114-114334}"
-NUM_SAMPLES="${2:-10000}"
+NUM_SAMPLES="${2:-100000}"  # Increased to 100,000 for better statistical accuracy
 
 export RUN_DIR NUM_SAMPLES
 
@@ -20,7 +20,7 @@ import random
 import os
 
 run_dir = Path(os.environ.get('RUN_DIR', '/lambda/nfs/med-align/tokenizer_adapt/tokalign_paper_optimal_20251114-114334'))
-num_samples = int(os.environ.get('NUM_SAMPLES', '10000'))
+num_samples = int(os.environ.get('NUM_SAMPLES', '100000'))
 model_path = run_dir / 'embedding_warmup' / 'checkpoint-3500'
 baseline_tokenizer = 'mistralai/Mistral-7B-v0.3'
 
