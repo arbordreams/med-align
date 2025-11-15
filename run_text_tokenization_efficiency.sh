@@ -126,8 +126,8 @@ char_lengths = []
 byte_lengths = []
 
 for i, text in enumerate(texts):
-    if (i + 1) % 1000 == 0:
-        print(f'  Processed {i + 1:,} / {len(texts):,} samples...')
+    if (i + 1) % 10000 == 0 or (i + 1) == len(texts):
+        print(f'  Processed {i + 1:,} / {len(texts):,} samples ({((i+1)/len(texts)*100):.1f}%)...')
     
     # Tokenize with both tokenizers
     baseline_tokens = baseline_tok(text, add_special_tokens=False)['input_ids']
