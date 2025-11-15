@@ -3,7 +3,7 @@
 # Usage: ./run_tokenization_perplexity_eval.sh [RUN_DIR] [DATASET]
 
 RUN_DIR="${1:-/lambda/nfs/med-align/tokenizer_adapt/tokalign_paper_optimal_20251114-114334}"
-DATASET="${2:-uiyunkim-hub/pubmed-abstract:test}"
+DATASET="${2:-uiyunkim-hub/pubmed-abstract:train}"  # Changed to 'train' as 'test' split doesn't exist
 MAX_SAMPLES="${3:-5000}"
 
 cd /lambda/nfs/med-align/med-align && python3 << PYEOF
