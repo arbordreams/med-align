@@ -57,7 +57,7 @@ vocab_adaptation:
   batch_size: 8             # GH200: use wider batch for good utilization
   gradient_accumulation: 8  # Effective batch ~64 sequences/step
   max_seq_length: 2048
-  train_start_idx_stage2: 0
+  train_start_idx_stage2: 1000000  # 20% offset for 5GB corpus decorrelation
   stage2_use_lora: true
   stage2_optimizer: "adamw_torch"
   lora_r: 64
