@@ -71,21 +71,8 @@ PY_VER=$(python -c "import sys; print(f'cp{sys.version_info.major}{sys.version_i
 echo "[install] Detected architecture: ${ARCH}, Python: ${PY_VER}"
 
 if [ "${ARCH}" = "aarch64" ] || [ "${ARCH}" = "arm64" ]; then
-  echo "[install] ARM64 detected - attempting to install flash-attn from source (no pre-built wheel available)..."
-  echo "[install] NOTE: Flash-attn compilation on ARM64 can be memory-intensive."
-  echo "[install] Limiting parallel jobs to avoid memory exhaustion (MAX_JOBS=4)..."
-  # Try to install from source for ARM64 with limited parallel jobs
-  # This prevents memory exhaustion during compilation (common issue on ARM64)
-  if ! MAX_JOBS=4 pip install --no-cache-dir flash-attn==2.8.3 --no-build-isolation; then
-    echo "[install] WARNING: flash-attn source build failed."
-    echo "[install] This may require:"
-    echo "[install]   - CUDA toolkit 12.8+ installed"
-    echo "[install]   - Build tools (gcc, make, ninja)"
-    echo "[install]   - Sufficient RAM (compilation can use 8GB+)"
-    echo "[install] Continuing without flash-attn (pipeline will run slower but still functional)."
-    echo "[install] You can retry flash-attn installation later if needed."
-    # Don't fail the entire installation - flash-attn is optional for basic functionality
-  fi
+  echo "[install] ARM64 detected (e.g., GH200) - skipping flash-attn installation."
+  echo "[install] Pipeline will run without flash-attn (slower but fully functional)."
 else
   # x86_64: try pre-built wheel first if available; otherwise fall back to source build
   WHEEL_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.7cxx11abiTRUE-${PY_VER}-${PY_VER}-linux_${ARCH}.whl"
