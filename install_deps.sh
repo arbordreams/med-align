@@ -35,15 +35,15 @@ fi
 echo "[install] Upgrading pip, setuptools, wheel..."
 pip install --upgrade pip setuptools wheel
 
-echo "[install] Installing torch==2.8.0 and compatible torchvision (CUDA 12.8 wheels)..."
-# Install torch 2.8.0 (has official flash-attn wheels) with compatible torchvision
+echo "[install] Installing torch==2.7.1 and compatible torchvision (CUDA 12.8 wheels)..."
+# Install torch 2.7.1 (CUDA 12.8 wheels) with compatible torchvision
 # Use --user only if not in venv (venv detection happens above)
 # torchvision 0.23.0 is compatible with torch 2.8.0
 PIP_USER_FLAG=""
 if [ -z "${VIRTUAL_ENV:-}" ]; then
   PIP_USER_FLAG="--user"
 fi
-pip install ${PIP_USER_FLAG} --force-reinstall --no-cache-dir torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu128
+pip install ${PIP_USER_FLAG} --force-reinstall --no-cache-dir torch==2.7.1 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
 
 echo "[install] Installing remaining Python dependencies (excluding torch/flash-attn)..."
 # Filter out torch and flash-attn from bulk install to avoid build/ABI issues
@@ -64,7 +64,7 @@ rm -f "${TMP_REQ}"
 echo "[install] Installing tf-keras for transformers TensorFlow compatibility..."
 pip install --no-cache-dir tf-keras
 
-echo "[install] Installing flash-attn 2.8.3 (required, pre-built wheel for torch 2.8.0)..."
+echo "[install] Installing flash-attn 2.8.3 (best-effort; compatible with torch 2.7.x)..."
 # Detect architecture for flash-attn wheel
 ARCH=$(uname -m)
 PY_VER=$(python -c "import sys; print(f'cp{sys.version_info.major}{sys.version_info.minor}')")
@@ -87,18 +87,17 @@ if [ "${ARCH}" = "aarch64" ] || [ "${ARCH}" = "arm64" ]; then
     # Don't fail the entire installation - flash-attn is optional for basic functionality
   fi
 else
-  # x86_64: use pre-built wheel
-  WHEEL_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-${PY_VER}-${PY_VER}-linux_${ARCH}.whl"
+  # x86_64: try pre-built wheel first if available; otherwise fall back to source build
+  WHEEL_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.7cxx11abiTRUE-${PY_VER}-${PY_VER}-linux_${ARCH}.whl"
   echo "[install] Attempting to install pre-built wheel: ${WHEEL_URL}"
-  pip install --no-cache-dir "${WHEEL_URL}" || {
-    echo "[install] WARNING: Pre-built wheel failed, falling back to source build..."
-    pip install --no-cache-dir flash-attn==2.8.3 --no-build-isolation || {
-      echo "[install] ERROR: Failed to install flash-attn."
-      exit 1
-    }
-  }
+  if ! pip install --no-cache-dir "${WHEEL_URL}"; then
+    echo "[install] WARNING: Pre-built wheel failed or not available, falling back to source build..."
+    if ! pip install --no-cache-dir flash-attn==2.8.3 --no-build-isolation; then
+      echo "[install] WARNING: Failed to install flash-attn; continuing without it."
+    fi
+  fi
 fi
-echo "[install] flash-attn installation completed"
+echo "[install] flash-attn installation step completed"
 
 echo "[install] Verifying flash-attn import..."
 python - <<'PY'
@@ -141,4 +140,3 @@ except Exception as e:
 PY
 
 echo "[install] All dependencies installed successfully."
-

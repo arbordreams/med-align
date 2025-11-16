@@ -35,17 +35,17 @@ conda create -n tokalign python=3.12
 conda activate tokalign
 
 # Install PyTorch first. Use the CUDA 12.8 wheel on Linux GPU hosts:
-pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
 
 # On macOS or CPU-only environments, omit the CUDA index:
-# pip install torch==2.8.0
+# pip install torch==2.7.1
 
 pip install -r requirements.txt
 ```
 
 `requirements.txt` pins modern PyPI builds compatible with Python 3.12, including the precompiled `fasttext-wheel>=0.9.2` distribution required for the FastText embedding backend.
 
-The medical pipeline is tested with **Python 3.12**, **CUDA 12.8**, and **PyTorch 2.8.0**. Confirm your interpreter with `python --version` before running the installers.
+The medical pipeline is tested with **Python 3.12**, **CUDA 12.8**, and **PyTorch 2.7.1**. Confirm your interpreter with `python --version` before running the installers.
 
 Linux-only extras (`deepspeed`, `bitsandbytes`) are guarded by environment markers and will be skipped automatically on unsupported platforms. `flash-attn` is installed best-effort by the helper script and is optional for the medical pipeline.
 

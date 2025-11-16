@@ -192,7 +192,7 @@ python -c "import flash_attn; print('Flash-attn available')" || echo "Flash-attn
 2. **Check CUDA**: `nvcc --version` should show 12.8+
 3. **Manual install**: 
    ```bash
-   pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+   pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
    ```
 
 ### Performance Issues
@@ -325,4 +325,3 @@ The install script automatically verifies PyTorch and CUDA availability after in
 - Build flash-attn later if needed for optimal performance
 - Pipeline is fully functional without flash-attn (just slower)
 - GH200 offers significant speedup and cost savings
-
