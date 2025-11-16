@@ -47,6 +47,10 @@ def get_default_config() -> Dict[str, Any]:
             "top_k": 500,
             "min_frequency": 5,
             "use_tfidf": False,
+            "use_adaptive_thresholds": True,
+            "quality_filter": True,
+            "min_quality_score": 0.3,
+            "medical_patterns": None,
         },
         "embedding": {
             "backend": "fasttext",
@@ -72,6 +76,16 @@ def get_default_config() -> Dict[str, Any]:
             "max_samples": 128,
             "qa": False,
             "baseline_model": "mistralai/Mistral-7B-v0.3",
+        },
+        "baseline_comparison": {
+            "enabled": False,
+            "train_baseline": False,
+            "compare_training": False,
+            "compare_performance": False,
+            "modes": ["embed_only", "full"],
+            "baseline_model": "mistralai/Mistral-7B-v0.3",
+            "baseline_tokenizer": "mistralai/Mistral-7B-v0.3",
+            "comparison_points": [1, 10, 50, 100],
         },
         "pipeline": {
             "run_root": "runs/tokenizer_adapt",
@@ -132,6 +146,7 @@ def _validate_config_structure(cfg: Dict[str, Any]) -> None:
         "alignment",
         "tokenization",
         "evaluation",
+        "baseline_comparison",
         "pipeline",
         "vocab_adaptation",
     ]
@@ -154,12 +169,25 @@ def _validate_config_structure(cfg: Dict[str, Any]) -> None:
     if not isinstance(cfg["corpus"].get("deduplicate", True), bool):
         raise ValueError("corpus.deduplicate must be a boolean")
 
-    if not isinstance(cfg["term_mining"].get("top_k", 0), int):
+    term_mining = cfg["term_mining"]
+    if not isinstance(term_mining.get("top_k", 0), int):
         raise ValueError("term_mining.top_k must be an integer")
-    if not isinstance(cfg["term_mining"].get("min_frequency", 0), int):
+    if not isinstance(term_mining.get("min_frequency", 0), int):
         raise ValueError("term_mining.min_frequency must be an integer")
-    if not isinstance(cfg["term_mining"].get("use_tfidf", False), bool):
+    if not isinstance(term_mining.get("use_tfidf", False), bool):
         raise ValueError("term_mining.use_tfidf must be a boolean")
+    if not isinstance(term_mining.get("use_adaptive_thresholds", True), bool):
+        raise ValueError("term_mining.use_adaptive_thresholds must be a boolean")
+    if not isinstance(term_mining.get("quality_filter", True), bool):
+        raise ValueError("term_mining.quality_filter must be a boolean")
+    if not isinstance(term_mining.get("min_quality_score", 0.0), (int, float)):
+        raise ValueError("term_mining.min_quality_score must be a number")
+    mp = term_mining.get("medical_patterns", None)
+    if mp is not None:
+        if not isinstance(mp, (list, tuple)):
+            raise ValueError("term_mining.medical_patterns must be a list of strings or null")
+        if not all(isinstance(p, str) for p in mp):
+            raise ValueError("term_mining.medical_patterns must be a list of strings or null")
 
     if not isinstance(cfg["embedding"].get("backend", ""), str):
         raise ValueError("embedding.backend must be a string")
@@ -170,6 +198,8 @@ def _validate_config_structure(cfg: Dict[str, Any]) -> None:
         raise ValueError("embedding.fasttext.epochs must be an integer")
     if not isinstance(ft.get("mincount", 0), int):
         raise ValueError("embedding.fasttext.mincount must be an integer")
+    # Tolerate scientific-notation strings in lr by coercing to float
+    ft["lr"] = _coerce_to_float_if_numeric_str(ft.get("lr", 0.0))
     if not isinstance(ft.get("lr", 0.0), (int, float)):
         raise ValueError("embedding.fasttext.lr must be a number")
     if ft.get("thread", 0) is not None and not isinstance(ft.get("thread", 0), int):
@@ -197,6 +227,26 @@ def _validate_config_structure(cfg: Dict[str, Any]) -> None:
         raise ValueError("evaluation.qa must be a boolean")
     if not isinstance(cfg["evaluation"].get("baseline_model", ""), str):
         raise ValueError("evaluation.baseline_model must be a string")
+
+    bc = cfg.get("baseline_comparison", {})
+    if not isinstance(bc, dict):
+        raise ValueError("baseline_comparison must be a mapping")
+    for key in ("enabled", "train_baseline", "compare_training", "compare_performance"):
+        if not isinstance(bc.get(key, False), bool):
+            raise ValueError(f"baseline_comparison.{key} must be a boolean")
+    if not isinstance(bc.get("baseline_model", ""), str):
+        raise ValueError("baseline_comparison.baseline_model must be a string")
+    if not isinstance(bc.get("baseline_tokenizer", ""), str):
+        raise ValueError("baseline_comparison.baseline_tokenizer must be a string")
+    modes = bc.get("modes", [])
+    if modes is not None:
+        if not isinstance(modes, list) or any(not isinstance(m, str) for m in modes):
+            raise ValueError("baseline_comparison.modes must be a list of strings")
+    comp_points = bc.get("comparison_points", [])
+    if comp_points is not None:
+        if not isinstance(comp_points, list) or any(not isinstance(p, int) for p in comp_points):
+            raise ValueError("baseline_comparison.comparison_points must be a list of integers")
+
     if not isinstance(cfg["pipeline"].get("run_root", ""), str):
         raise ValueError("pipeline.run_root must be a string")
     if not isinstance(cfg["pipeline"].get("max_retries", 0), int):
@@ -378,5 +428,3 @@ def save_config(config: Dict[str, Any], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as fp:
         yaml.safe_dump(config, fp, sort_keys=False)
-
-

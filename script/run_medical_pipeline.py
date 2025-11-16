@@ -25,7 +25,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 # Always prefer the local repository's src/ over any installed package named 'src'
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -218,7 +218,16 @@ def main() -> None:
 
     LOGGER.info("Run directory: %s", run_dir)
 
-    stage_outputs: Dict[str, Dict[str, str]] = {}
+    stage_outputs: Dict[str, Dict[str, Any]] = {}
+    baseline_cfg = final_cfg.get("baseline_comparison", {})
+    baseline_context: Dict[str, Any] = {
+        "enabled": bool(baseline_cfg.get("enabled", False)),
+        "dataset_path": None,
+        "training": {},
+        "training_comparison": {},
+        "performance_comparison": {},
+        "analysis": {},
+    }
 
     stage_outputs["data_prep"] = _retry(
         "aggregate_corpus",
@@ -236,17 +245,24 @@ def main() -> None:
     aggregated_jsonl = stage_outputs["data_prep"]["aggregated_jsonl"]
 
     def _mine_terms() -> Dict[str, str]:
-        terms = medical_terms.mine_terms(
+        terms, metadata = medical_terms.mine_terms(
             corpus_path=aggregated_jsonl,
             top_k=int(final_cfg["term_mining"]["top_k"]),
             min_count=int(final_cfg["term_mining"]["min_frequency"]),
             use_tfidf=bool(final_cfg["term_mining"]["use_tfidf"]),
+            use_adaptive_thresholds=bool(final_cfg["term_mining"].get("use_adaptive_thresholds", True)),
+            quality_filter=bool(final_cfg["term_mining"].get("quality_filter", True)),
+            min_quality_score=float(final_cfg["term_mining"].get("min_quality_score", 0.3)),
+            medical_patterns=final_cfg["term_mining"].get("medical_patterns"),
         )
         terms_path = run_dir / "corpus" / "medical_terms.txt"
         with open(terms_path, "w", encoding="utf-8") as fp:
             for term in terms:
                 fp.write(term + "\n")
-        LOGGER.info("Selected %s medical terms.", len(terms))
+        metadata_path = Path(str(terms_path) + ".metadata.json")
+        with open(metadata_path, "w", encoding="utf-8") as fp:
+            json.dump(metadata, fp, indent=2)
+        LOGGER.info("Selected %s medical terms (metadata: %s).", len(terms), metadata_path)
 
         augmented_dir = run_dir / "tokenizers"
         source_aug_dir = augmented_dir / "source"
@@ -263,6 +279,7 @@ def main() -> None:
         )
         summary = {
             "terms_path": str(terms_path),
+            "terms_metadata": str(metadata_path),
             "source_tokenizer": str(source_aug_dir),
             "target_tokenizer": str(target_aug_dir),
             "added_source": len(added_source),
@@ -302,6 +319,74 @@ def main() -> None:
             min_line_length=int(final_cfg["tokenization"]["min_line_length"]),
         ),
     )
+
+    if baseline_context["enabled"]:
+        stage_outputs["baseline_comparison"] = {}
+        baseline_tokenizer_id = str(baseline_cfg.get("baseline_tokenizer", target_tokenizer_cfg))
+        baseline_model_id = str(baseline_cfg.get("baseline_model", baseline_tokenizer_id))
+        dataset_override = baseline_cfg.get("dataset_path")
+        dataset_path: Optional[str] = None
+        if dataset_override:
+            dataset_path = dataset_override
+        else:
+            baseline_dataset_dir = run_dir / "datasets" / str(baseline_cfg.get("dataset_subdir", "baseline"))
+            marker = baseline_dataset_dir / "dataset_dict.json"
+            if marker.exists():
+                dataset_path = str(baseline_dataset_dir)
+            else:
+                def _prepare_baseline_dataset() -> Dict[str, str]:
+                    result_path = medical_pipeline.tokenize_with_tokenizer(
+                        run_dir=run_dir,
+                        aggregated_jsonl=aggregated_jsonl,
+                        tokenizer_path=baseline_tokenizer_id,
+                        fallback_model=baseline_model_id,
+                        output_subdir=str(baseline_cfg.get("dataset_subdir", "baseline")),
+                        tokenizer_workers=int(final_cfg["tokenization"]["workers"]),
+                        tokenizer_cache_dir=final_cfg["tokenization"]["cache_dir"],
+                    )
+                    return {"dataset_path": result_path}
+
+                dataset_result = _retry(
+                    "baseline_tokenization",
+                    final_cfg["pipeline"]["max_retries"],
+                    final_cfg["pipeline"]["retry_backoff"],
+                    _prepare_baseline_dataset,
+                )
+                dataset_path = dataset_result.get("dataset_path")
+        baseline_context["dataset_path"] = dataset_path
+        stage_outputs["baseline_comparison"]["dataset"] = {"path": dataset_path}
+
+        if bool(baseline_cfg.get("train_baseline", False)) and dataset_path:
+            modes = list(baseline_cfg.get("modes") or ["embed_only", "full"])
+            training_results: Dict[str, Dict[str, str]] = {}
+
+            for mode_item in modes:
+                mode_label = str(mode_item)
+                mode_norm = mode_label.lower()
+
+                def _run_baseline_training(current_mode: str = mode_norm) -> Dict[str, str]:
+                    start_model = baseline_model_id
+                    embed_result = training_results.get("embed_only")
+                    if current_mode.lower() != "embed_only" and embed_result:
+                        start_model = embed_result.get("model_dir", baseline_model_id)
+                    return medical_pipeline.train_baseline_model(
+                        run_dir=run_dir,
+                        baseline_model=start_model,
+                        baseline_tokenizer=baseline_tokenizer_id,
+                        dataset_path=str(dataset_path),
+                        config=final_cfg["vocab_adaptation"],
+                        mode=current_mode,
+                    )
+
+                training_results[mode_norm] = _retry(
+                    f"baseline_train_{mode_norm}",
+                    final_cfg["pipeline"]["max_retries"],
+                    final_cfg["pipeline"]["retry_backoff"],
+                    _run_baseline_training,
+                )
+
+            baseline_context["training"] = training_results
+            stage_outputs["baseline_comparison"]["training"] = training_results
 
     stage_outputs["train_align"] = _retry(
         "train_embeddings_and_align",
@@ -380,7 +465,7 @@ def main() -> None:
                 raise RuntimeError("Missing tokenized target dataset path for vocabulary adaptation.")
             result = medical_pipeline.vocab_adaptation(
                 run_dir=run_dir,
-                adapted_model_path=stage_outputs["apply"]["model_dir"],
+                adapted_model_path=eval_model_path,
                 dataset_path=str(dataset_path),
                 config=final_cfg["vocab_adaptation"],
             )
@@ -397,6 +482,79 @@ def main() -> None:
             "final_model_dir",
             vocab_result.get("model_dir", eval_model_path),
         )
+
+    if baseline_context["enabled"]:
+        comparison_points = baseline_cfg.get("comparison_points")
+        baseline_output_entry = stage_outputs.setdefault("baseline_comparison", {})
+        training_results = baseline_context.get("training") or {}
+        training_cmp: Dict[str, Any] = {}
+        if bool(baseline_cfg.get("compare_training", False)) and training_results and stage_outputs.get("vocab_adaptation"):
+            vocab_stage = stage_outputs.get("vocab_adaptation", {})
+            stage1_dir = vocab_stage.get("stage1_model_dir")
+            stage2_dir = vocab_stage.get("stage2_model_dir")
+            if training_results.get("embed_only") and stage1_dir:
+                baseline_state = training_results["embed_only"].get("trainer_state")
+                adapted_state = str(Path(stage1_dir) / "trainer_state.json")
+                if baseline_state and Path(baseline_state).exists() and Path(adapted_state).exists():
+                    embed_cmp = medical_pipeline.compare_training_metrics(
+                        run_dir=run_dir,
+                        baseline_trainer_state=str(baseline_state),
+                        adapted_trainer_state=adapted_state,
+                        mode="embed_only",
+                        comparison_points=comparison_points,
+                    )
+                    if isinstance(embed_cmp, dict):
+                        embed_section = embed_cmp.get("embed_only")
+                        if embed_section is not None:
+                            training_cmp["embed_only"] = embed_section
+            if training_results.get("full") and stage2_dir:
+                baseline_state = training_results["full"].get("trainer_state")
+                adapted_state = str(Path(stage2_dir) / "trainer_state.json")
+                if baseline_state and Path(baseline_state).exists() and Path(adapted_state).exists():
+                    full_cmp = medical_pipeline.compare_training_metrics(
+                        run_dir=run_dir,
+                        baseline_trainer_state=str(baseline_state),
+                        adapted_trainer_state=adapted_state,
+                        mode="full",
+                        comparison_points=comparison_points,
+                    )
+                    if isinstance(full_cmp, dict):
+                        full_section = full_cmp.get("full_model") or full_cmp.get("full")
+                        if full_section is not None:
+                            training_cmp["full_model"] = full_section
+        baseline_context["training_comparison"] = training_cmp
+        if training_cmp:
+            baseline_output_entry["training_comparison"] = training_cmp
+
+        performance_cmp: Dict[str, Any] = {}
+        if bool(baseline_cfg.get("compare_performance", False)):
+            baseline_eval_model = (
+                (training_results.get("full") or training_results.get("full_model") or {}).get("model_dir")
+                or (training_results.get("embed_only") or {}).get("model_dir")
+                or str(baseline_cfg.get("baseline_model", baseline_cfg.get("baseline_tokenizer", target_tokenizer_cfg)))
+            )
+            baseline_tokenizer_id = str(baseline_cfg.get("baseline_tokenizer", target_tokenizer_cfg))
+            adapted_tokenizer_eval = args.eval_tokenizer or augmented_target
+            performance_cmp = medical_pipeline.compare_final_performance(
+                run_dir=run_dir,
+                baseline_model_path=str(baseline_eval_model),
+                baseline_tokenizer_path=baseline_tokenizer_id,
+                adapted_model_path=eval_model_path,
+                adapted_tokenizer_path=adapted_tokenizer_eval,
+                eval_config=final_cfg["evaluation"],
+            )
+        baseline_context["performance_comparison"] = performance_cmp
+        if performance_cmp:
+            baseline_output_entry["performance_comparison"] = performance_cmp
+
+        if training_cmp or performance_cmp:
+            analysis_result = medical_pipeline.generate_initialization_analysis(
+                run_dir=run_dir,
+                training_comparison=training_cmp,
+                performance_comparison=performance_cmp,
+            )
+            baseline_context["analysis"] = analysis_result
+            baseline_output_entry["analysis"] = analysis_result
 
     eval_enabled = bool(final_cfg["evaluation"]["enabled"]) and not args.skip_eval
     eval_datasets = list(final_cfg["evaluation"]["datasets"] or [])
@@ -531,4 +689,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

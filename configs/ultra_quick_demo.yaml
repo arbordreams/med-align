@@ -5,7 +5,7 @@ models:
   source_model: "BioMistral/BioMistral-7B"
 
 corpus:
-  size_gb: 0.05    # ~50MB quick smoke test
+  size_gb: 0.005   # ~5MB ultra-quick smoke test
   byte_budget: 0   # 0 = derive from size_gb
   deduplicate: true
   hash_name: "sha256"
@@ -55,12 +55,12 @@ vocab_adaptation:
   use_flash_attn: false  # Opt-in: enable if flash-attn is installed (often fails on ARM64/GH200)
   bf16: false
 
-# Evaluation (disabled for demo speed)
+# Evaluation (enabled with small sample for quick end-to-end check)
 evaluation:
   enabled: true
   datasets:
     - "uiyunkim-hub/pubmed-abstract:train"
-  max_samples: 128
+  max_samples: 32
   qa: true
   baseline_model: "mistralai/Mistral-7B-v0.3"
 
@@ -68,5 +68,4 @@ pipeline:
   run_root: "runs/tokenizer_adapt"
   max_retries: 1
   retry_backoff: 5.0
-
 

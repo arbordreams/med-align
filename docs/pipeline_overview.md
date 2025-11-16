@@ -23,7 +23,7 @@ flag so that the original parallel behaviour stays available:
 | Stage | Switch Point | Medical Functionality |
 | ----- | ------------ | --------------------- |
 | Data preparation | `script/convert2glove_corpus.sh` | Use `src/medical_corpus.py` to stream JSONL shards, mirror texts for source/target, and enforce dedup / byte budgets. |
-| Term mining | `src/process_dataset.py` | Defer to `src/medical_terms.py` when `--medical_terms_path` is supplied to augment tokenizers before tokenization. |
+| Term mining | `src/process_dataset.py` / `src/medical_terms.py` | Use `src/medical_terms.py` to mine domain-specific terms with frequency/TF-IDF ranking, adaptive thresholds, and quality filtering; then augment tokenizers before tokenization. |
 | Embedding & alignment | `script/token_align.sh` | Share the single medical corpus across source/target embeddings, choose embedding backend, and route outputs under `runs/tokenizer_adapt/<timestamp>/`. |
 | Automation | `script/run_medical_pipeline.py` | Chains the full medical pipeline while preserving the legacy shell scripts for parallel mode. |
 

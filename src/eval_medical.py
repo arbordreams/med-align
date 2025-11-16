@@ -139,7 +139,7 @@ def evaluate_perplexity(
     # Use streaming to avoid downloading entire large datasets.
     try:
         ds = datasets.load_dataset(
-            dataset_name,
+                    dataset_name,
             name=dataset_config,
             split=split,
             streaming=True,
@@ -652,4 +652,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

@@ -1,69 +1,144 @@
 models:
+  # Medical source model/tokenizer (BioMistral) → aligned into Mistral tokenizer space.
   source_tokenizer: "BioMistral/BioMistral-7B"
   target_tokenizer: "mistralai/Mistral-7B-v0.3"
   source_model: "BioMistral/BioMistral-7B"
 
 corpus:
+  # Use a large 10GB medical corpus for strong coverage of terminology and phrase patterns.
   size_gb: 10.0
-  byte_budget: 0   # 0 = derive from size_gb
+  # Let the pipeline derive byte_budget from size_gb (keeps config simple and consistent).
+  byte_budget: 0
+  # Deduplication is important at this scale to avoid over‑representing frequent documents.
   deduplicate: true
   hash_name: "sha256"
 
 term_mining:
+  # Mine a large but still focused vocabulary of candidate medical terms.
   top_k: 2000
-  min_frequency: 5  # Increased from 3 to focus on recurring medical concepts, filter noisy n-grams
+  # Discard very rare terms that are unlikely to be stable training signals.
+  min_frequency: 10
+  # TF‑IDF yields higher‑quality medical term lists than pure frequency, and 64 vCPUs make it cheap.
   use_tfidf: true
 
 embedding:
   backend: "fasttext"
   fasttext:
-    epochs: 30
-    mincount: 1
+    # More epochs → better embedding quality; 20 balances quality vs total CPU time on 10GB.
+    epochs: 20
+    # Ignore extremely rare tokens; keeps model size and noise in check.
+    mincount: 5
     lr: 0.05
-    thread: null   # auto-scaled based on detected vCPUs
+    # CRITICAL: explicit CPU utilization.
+    # FastText is trained for source + target in parallel (2 workers).
+    # Setting thread=32 means 32 threads per worker → 64 total threads → all 64 vCPUs used.
+    thread: 32
 
 alignment:
+  # Higher pivot_count yields more robust Procrustes alignment across vocabularies.
   pivot_count: 2000
-  similarity_threshold: 0.4  # TokAlign paper uses relative representation with pivot tokens
+  # Stricter similarity threshold than default to avoid noisy mappings.
+  similarity_threshold: 0.4
 
 tokenization:
-  workers: null   # auto-scaled
+  # CRITICAL: explicit tokenization parallelism.
+  # Use all 64 vCPUs to make 10GB tokenization and dataset creation fast.
+  workers: 64
   cache_dir: null
-  min_line_length: 0
+  min_line_length: 0          # Keep all sequences; filtering can bias distribution.
 
 evaluation:
   enabled: true
-  datasets: []  # Perplexity evaluation datasets (MedMCQA is better for QA, see qa flag below)
-  max_samples: 10000  # Increased from 1000 for better statistical significance
-  qa: true  # Enables MedMCQA evaluation (openlifescienceai/medmcqa, ~194k multiple-choice questions)
+  # Perplexity benchmarks on medical text. Add/remove datasets as needed.
+  datasets:
+    - "uiyunkim-hub/pubmed-abstract:validation"
+  # Use a large sample budget for research‑grade statistics, but still manageable in time.
+  max_samples: 10000
+  # Enable MedMCQA evaluation to measure end‑task gains.
+  qa: true
+  # Baseline model for QA and coverage comparisons.
   baseline_model: "mistralai/Mistral-7B-v0.3"
 
 pipeline:
+  # Keep standard run_root used by the rest of the tooling.
   run_root: "runs/tokenizer_adapt"
   max_retries: 1
   retry_backoff: 5.0
 
 embedding_warmup:
-  enabled: true  # Lightweight embedding-only warm-up after alignment
-  # TokAlign reports 30-60% perplexity reduction from this stage alone
-  # Trains only: embedding layer + LM head (freezes all transformer layers)
-  # Low cost: <1% of full fine-tuning, helps stabilize new medical tokens
-  steps: 3500  # 1-5k steps recommended (using 3500 for better convergence)
-  lr: 1e-4     # Increased from 5e-5 for stronger adaptation, closer to TokAlign perplexity reductions
+  # Stage 0: very cheap embedding+LM warm‑up after alignment.
+  enabled: true
+  # 3.5k steps is enough to stabilize new tokens but still inexpensive.
+  steps: 3500
+  # Conservative LR for embeddings; avoids over‑fitting token neighborhoods early.
+  lr: 5.0e-5
+  # Per‑device batch size; GH200 96GB can handle FP32 with this batch at 2k context.
   batch_size: 4
+  # Effective batch size = 4 * 8 = 32 sequences/step.
   gradient_accumulation: 8
   max_seq_length: 2048
-  seed: 0
-  use_flash_attn: false  # Opt-in: enable if flash-attn is installed
-  bf16: true  # Better stability than fp16, good for GH200
+  seed: 42
+  # Prefer standard FP32 attention; flash can be enabled later if desired.
+  use_flash_attn: false
+  # IMPORTANT: disable bf16 so training runs in FP32, matching the research preference.
+  bf16: false
 
 vocab_adaptation:
-  enabled: false  # Original TokAlign paper does NOT use full fine-tuning
-  # TokAlign core method: Alignment matrix + weight rearrangement + embedding warm-up
-  # The original paper does:
-  #   1. Train embeddings (FastText/GloVe)
-  #   2. Compute alignment matrix (cal_trans_matrix.py)
-  #   3. Initialize model weights via alignment (convert.py)
-  #   4. Optional: Embedding warm-up (embeddings + LM head only) - RECOMMENDED
-  # Full two-stage fine-tuning is an optional extension, not part of core method
+  # Full two‑stage TokAlign fine‑tuning (after warmup).
+  enabled: true
 
+  # Stage 1: embeddings‑only refinement (similar to TokAlign Stage 1).
+  # Slightly longer than default to better exploit 10GB corpus.
+  stage1_steps: 2500
+  # Research-optimized LR: 5e-5 keeps embeddings-only training stable in FP32.
+  lr_stage1: 5e-5
+
+  # Stage 2: full‑model fine‑tuning (most expensive phase).
+  # 2500 steps empirically gives clear convergence gains while keeping total time <~30h.
+  stage2_steps: 2500
+  # Conservative LR for full 7B FP32 fine‑tuning.
+  lr_stage2: 4.0e-5
+
+  # Per‑device batch; with FP32 and gradient checkpointing this fits comfortably on GH200.
+  batch_size: 2
+  # Effective batch ~ 2 * 32 = 64 sequences/step for Stage 1 and Stage 2.
+  gradient_accumulation: 32
+  max_seq_length: 2048
+  # Start at beginning of dataset for Stage 2; we want the model to see full corpus,
+  # not just a high‑index slice, for fair baseline vs adapted comparisons.
+  train_start_idx_stage2: 0
+  seed: 42
+
+  # Prefer FP32 here as well; BF16/FP16 are faster but the experiment prioritizes quality.
+  use_flash_attn: false
+  bf16: false
+
+  # Use standard AdamW; LoRA is disabled because we want to actually adapt full weights
+  # for a strong “best effort” adapted model (not a parameter‑efficient variant).
+  stage2_optimizer: "adamw_torch"
+  stage2_use_lora: false
+
+baseline_comparison:
+  # Enable full baseline vs adapted comparison pipeline.
+  enabled: true
+  # Train baseline models with same data and hyperparameters:
+  #   - embed_only: embeddings + LM head only
+  #   - full: full‑model fine‑tuning
+  train_baseline: true
+  # Enable trajectory comparison using trainer_state logs.
+  compare_training: true
+  # Enable final performance comparison (perplexity, QA accuracy, tokenization).
+  compare_performance: true
+
+  # Compare both training regimes:
+  #   - "embed_only" vs TokAlign Stage 1 / warmup
+  #   - "full" vs TokAlign Stage 2 full fine‑tuning
+  modes: ["embed_only", "full"]
+
+  # Baseline is vanilla Mistral with its original tokenizer.
+  baseline_model: "mistralai/Mistral-7B-v0.3"
+  baseline_tokenizer: "mistralai/Mistral-7B-v0.3"
+
+  # Densely sample early and mid training steps to quantify initialization quality
+  # (Step 1, early steps) and convergence behavior (up to ~Stage 2 length).
+  comparison_points: [1, 10, 50, 100, 250, 500, 1000, 1500, 2000, 2500]

@@ -71,42 +71,64 @@ bash script/convert2glove_corpus.sh
 ### Medical monolingual pipeline
 
 The medical adaptation ingests JSONL shards where each line is `{"text": ...}` and
-reuses the same text for both source and target tokenizers. Set
-`TOKALIGN_MODE=medical` to activate the new flow:
+reuses the same text for both source and target tokenizers.
 
+Medical term extraction is handled by `src/medical_terms.py`. It supports:
+
+- Frequency-based and TF-IDF-based term mining.
+- Adaptive thresholds that select a minimum frequency close to the desired `top_k`.
+- Heuristic quality filtering and scoring of candidate medical terms.
+
+Key config fields (see `docs/config_schema.md` and YAML presets such as
+`configs/research.yaml` or `configs/tokalign_paper_optimal.yaml`):
+
+- `term_mining.top_k`: maximum number of terms to keep.
+- `term_mining.min_frequency`: minimum raw frequency for a term to be considered.
+- `term_mining.use_tfidf`: if true, rank by TF-IDF scores instead of pure frequency.
+- `term_mining.use_adaptive_thresholds`: if true (default), compute an adaptive
+  frequency threshold (percentile / mean+std / log-scaled) to approximate `top_k`.
+- `term_mining.quality_filter`: if true (default), apply heuristic quality checks
+  (length, alphabetic content, optional regex patterns).
+- `term_mining.min_quality_score`: minimum composite quality score in `[0, 1]`
+  required for inclusion. The score combines frequency (log-scaled), TF-IDF, and
+  token characteristics.
+- `term_mining.medical_patterns`: optional list of regex patterns; when set, mined
+  terms must match at least one pattern.
+
+The mining function returns both the selected terms and metadata:
+
+- `terms`: list of strings, the mined medical terms.
+- `metadata`: dictionary with statistics such as:
+  - `total_docs`, `total_terms`
+  - `filtered_by_threshold`, `filtered_by_quality`
+  - `adaptive_thresholds` (per-method thresholds and the chosen one)
+  - `final_term_count`
+  - `quality_score_stats` (min/max/mean/std)
+  - `max_tfidf`
+
+The Python runner (`script/run_medical_pipeline.py`) writes two files under
+each run directory:
+
+- `corpus/medical_terms.txt`: newline-separated list of mined medical terms.
+- `corpus/medical_terms.txt.metadata.json`: JSON metadata matching the schema above.
+
+The standalone CLI in `src/medical_terms.py` exposes the same functionality:
+
+```bash
+python -m src.medical_terms mine \
+  --corpus /path/to/medical_corpus.jsonl \
+  --output /tmp/medical_terms.txt \
+  --top-k 2000 \
+  --min-count 10 \
+  --use-tfidf \
+  --use-adaptive-thresholds \
+  --quality-filter \
+  --min-quality-score 0.3 \
+  --medical-patterns "(?i)hypertension" \
+  --medical-patterns "(?i)diabetes"
 ```
-export TOKALIGN_MODE=medical
-export MEDICAL_INPUTS="/abs/path/to/medical/shard_dir"
-export TOKENIZER_PATH1="BioMistral/BioMistral-7B"
-export TOKENIZER_PATH2="mistralai/Mistral-7B-v0.3"
-export MODLE_PATH1="BioMistral/BioMistral-7B"
-export GLOVE_DIR="/abs/path/to/GloVe"  # contains compiled binaries
 
-# Optional knobs
-export MEDICAL_BYTE_BUDGET=$((5 * 1024 * 1024 * 1024))   # 5GB limit
-export MEDICAL_TERM_TOP_K=800
-export TOKALIGN_EMBEDDING_BACKEND=fasttext  # default is fasttext (via fasttext-wheel)
-
-# Stage 1: aggregate corpus, mine medical terms, tokenize with mirrored text.
-bash script/convert2glove_corpus.sh
-
-# Stage 2: train embeddings + compute alignment (identical corpora on both sides).
-bash script/token_align.sh
-
-# Stage 3: apply alignment to initialise the adapted model.
-bash script/init_model.sh
-```
-
-All medical artefacts are routed to `runs/tokenizer_adapt/<timestamp>/`, including:
-
-- `corpus/medical_corpus.jsonl` and `corpus/medical_pairs.jsonl`
-- augmented tokenizers under `tokenizers/{source,target}`
-- embedding corpora (`glove_corpus/`), learned vectors, and `alignment/alignment_report.json`
-- the adapted model weights in `adapted_model/`
-
-Medical-specific logic (deduplication, mirrored tokenization, fast term mining)
-is guarded by the `TOKALIGN_MODE` flag, leaving the original parallel flow
-intact for backwards compatibility.
+This writes `/tmp/medical_terms.txt` and `/tmp/medical_terms.txt.metadata.json`.
 
 #### End-to-end runner
 

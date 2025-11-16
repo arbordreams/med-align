@@ -55,7 +55,7 @@ vocab_adaptation:
   batch_size: 4  # Increased from 2 for better gradient estimates
   gradient_accumulation: 16
   max_seq_length: 2048
-  train_start_idx_stage2: 2000000  # Optimized: 20% skip for 10GB corpus (~10M examples)
+  train_start_idx_stage2: 0  # 10GB corpus: start from beginning; offset is mainly useful for smaller corpora.
   # LoRA for Stage 2: Better stability and memory efficiency
   stage2_use_lora: true
   stage2_optimizer: "adamw_torch"
@@ -65,5 +65,4 @@ vocab_adaptation:
   lora_target_modules: "q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj"
   seed: 0
   use_flash_attn: false  # Opt-in: enable if flash-attn is installed (often fails on ARM64/GH200)
-  bf16: true  # Optimized: Enable for better performance (if supported)
-
+  bf16: false  # FP32 for maximum numerical stability and quality (user preference)

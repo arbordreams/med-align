@@ -19,6 +19,10 @@ Top-level sections
   - top_k: integer
   - min_frequency: integer
   - use_tfidf: boolean
+  - use_adaptive_thresholds: boolean
+  - quality_filter: boolean
+  - min_quality_score: number
+  - medical_patterns: list[string] or null
 - embedding
   - backend: string ("fasttext" or "glove")
   - fasttext:
@@ -56,5 +60,4 @@ Usage examples
 Environment variable substitution
 - Strings like "${HF_DATASETS_CACHE}" are expanded using the current environment.
 - See configs/examples/custom_example.yaml for a template.
-
 

@@ -17,7 +17,11 @@ def load_glove_model(File):
     return glove_model
 
 def normalize(x):
-    return x / np.linalg.norm(x)
+    norm = np.linalg.norm(x)
+    if norm == 0.0 or not np.isfinite(norm):
+        # Avoid introducing NaNs for zero or degenerate vectors; return zeros instead.
+        return np.zeros_like(x)
+    return x / norm
 
 def convert2matrix(glove_model):
     ids = list(glove_model.keys())

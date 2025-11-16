@@ -17,14 +17,16 @@ end-to-end workflow with retry logic.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import logging
+import math
 import os
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 import concurrent.futures as _futures
 
 import torch
@@ -55,6 +57,14 @@ def create_run_dir(run_root: Path = DEFAULT_RUN_ROOT, run_id: Optional[str] = No
     run_dir = run_root / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
+
+
+def _is_flash_attn_available() -> bool:
+    try:
+        import flash_attn  # type: ignore  # noqa: F401
+        return True
+    except Exception:
+        return False
 
 
 def _run_subprocess(
@@ -128,6 +138,59 @@ def _resolve_tokenizer_model_path(tokenizer_path: str, fallback_model: str) -> T
         return tokenizer_path, tokenizer_path
     return fallback_model, tokenizer_path
 
+
+def tokenize_with_tokenizer(
+    *,
+    run_dir: Path,
+    aggregated_jsonl: str,
+    tokenizer_path: str,
+    fallback_model: str,
+    output_subdir: str,
+    tokenizer_workers: int,
+    tokenizer_cache_dir: Optional[str] = None,
+) -> str:
+    """
+    Tokenize the aggregated corpus with a single tokenizer and persist the dataset.
+    This helper is reused for baseline dataset preparation.
+    """
+    dataset_dir = run_dir / "datasets"
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    dataset_path = dataset_dir / output_subdir
+    dataset_path.mkdir(parents=True, exist_ok=True)
+
+    cache_dir = tokenizer_cache_dir or str(run_dir / "cache")
+    os.makedirs(cache_dir, exist_ok=True)
+
+    model_path, token_path = _resolve_tokenizer_model_path(tokenizer_path, fallback_model)
+    cmd = [
+        sys.executable,
+        str(SCRIPT_ROOT / "src" / "process_dataset.py"),
+        "--model_name_or_path",
+        model_path,
+        "--tokenizer_name",
+        token_path,
+        "--train_file",
+        aggregated_jsonl,
+        "--only_tokenize",
+        "--validation_split_percentage",
+        "0",
+        "--dataset_path_in_disk",
+        str(dataset_path),
+        "--preprocessing_num_workers",
+        str(tokenizer_workers),
+        "--cache_dir",
+        cache_dir,
+        "--output_dir",
+        str(run_dir / "logs"),
+    ]
+    logger.info(
+        "Tokenizing corpus with %s (output=%s).",
+        tokenizer_path,
+        dataset_path,
+    )
+    _run_subprocess(cmd)
+    return str(dataset_path)
+
 def _train_fasttext_embedding(
     corpus_path: str,
     save_file: str,
@@ -200,37 +263,28 @@ def tokenize_corpus(
     cache_dir = tokenizer_cache_dir or str(run_dir / "cache")
     os.makedirs(cache_dir, exist_ok=True)
 
-    def _tokenize(tokenizer_path: str, output_subdir: str, fallback_model: str) -> Path:
-        dataset_path = dataset_dir / output_subdir
-        dataset_path.mkdir(parents=True, exist_ok=True)
-        model_path, token_path = _resolve_tokenizer_model_path(tokenizer_path, fallback_model)
-        cmd = [
-            sys.executable,
-            str(SCRIPT_ROOT / "src" / "process_dataset.py"),
-            "--model_name_or_path",
-            model_path,
-            "--tokenizer_name",
-            token_path,
-            "--train_file",
-            aggregated_jsonl,
-            "--only_tokenize",
-            "--validation_split_percentage",
-            "0",
-            "--dataset_path_in_disk",
-            str(dataset_path),
-            "--preprocessing_num_workers",
-            str(tokenizer_workers),
-            "--cache_dir",
-            cache_dir,
-            "--output_dir",
-            str(run_dir / "logs"),
-        ]
-        logger.info("Tokenizing corpus with %s.", tokenizer_path)
-        _run_subprocess(cmd)
-        return dataset_path
-
-    source_dataset = _tokenize(tokenizer_source, "source", source_model_fallback)
-    target_dataset = _tokenize(tokenizer_target, "target", target_model_fallback)
+    source_dataset = Path(
+        tokenize_with_tokenizer(
+            run_dir=run_dir,
+            aggregated_jsonl=aggregated_jsonl,
+            tokenizer_path=tokenizer_source,
+            fallback_model=source_model_fallback,
+            output_subdir="source",
+            tokenizer_workers=tokenizer_workers,
+            tokenizer_cache_dir=tokenizer_cache_dir,
+        )
+    )
+    target_dataset = Path(
+        tokenize_with_tokenizer(
+            run_dir=run_dir,
+            aggregated_jsonl=aggregated_jsonl,
+            tokenizer_path=tokenizer_target,
+            fallback_model=target_model_fallback,
+            output_subdir="target",
+            tokenizer_workers=tokenizer_workers,
+            tokenizer_cache_dir=tokenizer_cache_dir,
+        )
+    )
 
     def _convert(dataset_path: Path, output_file: Path) -> Path:
         cmd = [
@@ -523,13 +577,6 @@ def embedding_warmup(
     warmup_dir = run_dir / "embedding_warmup"
     warmup_dir.mkdir(parents=True, exist_ok=True)
 
-    def _is_flash_attn_available() -> bool:
-        try:
-            import flash_attn  # type: ignore  # noqa: F401
-            return True
-        except Exception:
-            return False
-
     # Extract config with explicit casting
     steps = int(config.get("steps", 2500))  # type: ignore[arg-type]
     lr = float(config.get("lr", 5e-5))  # type: ignore[arg-type]
@@ -646,13 +693,6 @@ def vocab_adaptation(
     stage2_dir = va_root / "stage2_full"
     stage1_dir.mkdir(parents=True, exist_ok=True)
     stage2_dir.mkdir(parents=True, exist_ok=True)
-
-    def _is_flash_attn_available() -> bool:
-        try:
-            import flash_attn  # type: ignore  # noqa: F401
-            return True
-        except Exception:
-            return False
 
     # Extract config with explicit casting
     stage1_steps = int(config.get("stage1_steps", 2500))  # type: ignore[arg-type]
@@ -808,8 +848,8 @@ def vocab_adaptation(
                 str(lora_dropout),
                 "--lora_target_modules",
                 lora_target_modules,
-        ]
-    )
+            ]
+        )
     logger.info("Starting vocabulary adaptation Stage 2 (full-model) at %s.", stage2_dir)
     _run_subprocess(stage2_args, env=cuda_env)
 
@@ -818,6 +858,710 @@ def vocab_adaptation(
         "stage1_model_dir": str(stage1_dir),
         "stage2_model_dir": str(stage2_dir),
         "final_model_dir": str(final_ckpt),
+    }
+
+
+def train_baseline_model(
+    *,
+    run_dir: Path,
+    baseline_model: str,
+    baseline_tokenizer: str,
+    dataset_path: str,
+    config: Dict[str, object],
+    mode: str = "embed_only",
+) -> Dict[str, str]:
+    """
+    Train the baseline model without alignment for apples-to-apples comparisons.
+    """
+    normalized_mode = mode.lower().strip()
+    if normalized_mode not in {"embed_only", "full"}:
+        raise ValueError(f"Unsupported baseline training mode '{mode}'. Expected 'embed_only' or 'full'.")
+    dataset_dir = Path(dataset_path)
+    if not dataset_dir.exists():
+        raise FileNotFoundError(f"Baseline dataset not found at {dataset_dir}")
+
+    training_dir = run_dir / "baseline_training" / normalized_mode
+    training_dir.mkdir(parents=True, exist_ok=True)
+
+    # Shared hyperparameters (mirrors vocab_adaptation defaults)
+    stage1_steps = int(config.get("stage1_steps", 2500))  # type: ignore[arg-type]
+    stage2_steps = int(config.get("stage2_steps", 2500))  # type: ignore[arg-type]
+    lr_stage1 = float(config.get("lr_stage1", 6.4e-4))  # type: ignore[arg-type]
+    lr_stage2 = float(config.get("lr_stage2", 5e-5))  # type: ignore[arg-type]
+    batch_size = int(config.get("batch_size", 2))  # type: ignore[arg-type]
+    grad_acc = int(config.get("gradient_accumulation", 16))  # type: ignore[arg-type]
+    max_seq_length = int(config.get("max_seq_length", 2048))  # type: ignore[arg-type]
+    train_start_idx_stage2 = int(config.get("train_start_idx_stage2", 2560000))  # type: ignore[arg-type]
+    seed = int(config.get("seed", 0))  # type: ignore[arg-type]
+    stage2_optimizer = str(config.get("stage2_optimizer", "adamw_torch"))
+    stage2_use_lora = bool(config.get("stage2_use_lora", False))
+    lora_r = int(config.get("lora_r", 64))
+    lora_alpha = int(config.get("lora_alpha", 16))
+    lora_dropout = float(config.get("lora_dropout", 0.1))
+    lora_target_modules = str(
+        config.get("lora_target_modules", "q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj")
+    )
+    use_flash_attn = bool(config.get("use_flash_attn", False)) and _is_flash_attn_available()
+    bf16_flag = bool(config.get("bf16", False))
+
+    steps = stage1_steps if normalized_mode == "embed_only" else stage2_steps
+    learning_rate = lr_stage1 if normalized_mode == "embed_only" else lr_stage2
+    train_start_idx = 0 if normalized_mode == "embed_only" else train_start_idx_stage2
+
+    logger.info(
+        "Starting baseline training (%s): steps=%d lr=%s batch=%d grad_acc=%d max_seq=%d bf16=%s "
+        "optimizer=%s lora=%s dataset=%s",
+        normalized_mode,
+        steps,
+        learning_rate,
+        batch_size,
+        grad_acc,
+        max_seq_length,
+        bf16_flag,
+        stage2_optimizer if normalized_mode == "full" else "adamw_torch",
+        stage2_use_lora if normalized_mode == "full" else False,
+        dataset_dir,
+    )
+
+    def _common_args() -> list[str]:
+        args: list[str] = [
+            sys.executable,
+            "-m",
+            "src.clm_train",
+            "--tokenizer_path",
+            baseline_tokenizer,
+            "--dataset_name",
+            dataset_path,
+            "--max_seq_length",
+            str(max_seq_length),
+            "--per_device_train_batch_size",
+            str(batch_size),
+            "--gradient_accumulation_steps",
+            str(grad_acc),
+            "--use_gradient_checkpointing",
+            "True",
+            "--bf16",
+            "True" if bf16_flag else "False",
+            "--packing",
+            "True",
+            "--lr_scheduler_type",
+            "cosine",
+            "--warmup_ratio",
+            "0.03",
+            "--weight_decay",
+            "0.01",
+            "--ignore_data_skip",
+            "True",
+            "--seed",
+            str(seed),
+        ]
+        if use_flash_attn:
+            args.extend(["--use_flash_attn", "True"])
+        return args
+
+    cuda_env: Dict[str, str] = {}
+    try:
+        import os as _os_env
+
+        if torch.cuda.is_available() and not _os_env.environ.get("CUDA_VISIBLE_DEVICES"):
+            cuda_env["CUDA_VISIBLE_DEVICES"] = "0"
+        if not _os_env.environ.get("PYTORCH_CUDA_ALLOC_CONF"):
+            cuda_env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+    except Exception:
+        pass
+
+    train_args = _common_args()
+    train_args.extend(
+        [
+            "--model_name",
+            baseline_model,
+            "--output_dir",
+            str(training_dir),
+            "--max_steps",
+            str(steps),
+            "--save_steps",
+            str(steps),
+            "--logging_steps",
+            "50",
+            "--learning_rate",
+            str(learning_rate),
+            "--train_start_idx",
+            str(train_start_idx),
+        ]
+    )
+    if normalized_mode == "embed_only":
+        train_args.extend(["--finetune_embed_only", "True"])
+    elif normalized_mode == "full":
+        if stage2_optimizer:
+            train_args.extend(["--optim", stage2_optimizer])
+        if stage2_use_lora:
+            train_args.extend(
+                [
+                    "--use_peft_lora",
+                    "True",
+                    "--lora_r",
+                    str(lora_r),
+                    "--lora_alpha",
+                    str(lora_alpha),
+                    "--lora_dropout",
+                    str(lora_dropout),
+                    "--lora_target_modules",
+                    lora_target_modules,
+                ]
+            )
+
+    _run_subprocess(train_args, env=cuda_env)
+
+    final_ckpt = training_dir / f"checkpoint-{steps}"
+    trainer_state = training_dir / "trainer_state.json"
+    logger.info(
+        "Baseline training (%s) complete. Checkpoint=%s trainer_state=%s",
+        normalized_mode,
+        final_ckpt,
+        trainer_state,
+    )
+    return {
+        "model_dir": str(final_ckpt if final_ckpt.exists() else training_dir),
+        "training_dir": str(training_dir),
+        "trainer_state": str(trainer_state),
+    }
+
+
+def compare_training_metrics(
+    *,
+    run_dir: Path,
+    baseline_trainer_state: str,
+    adapted_trainer_state: str,
+    mode: str,
+    comparison_points: Optional[List[int]] = None,
+) -> Dict[str, Any]:
+    """
+    Compare training trajectories between baseline and adapted models.
+    """
+
+    def _load_history(path: str) -> List[Dict[str, Any]]:
+        data = Path(path)
+        if not data.exists():
+            raise FileNotFoundError(f"trainer_state not found: {path}")
+        with open(data, "r", encoding="utf-8") as fp:
+            payload = json.load(fp)
+        history = payload.get("log_history", [])
+        cleaned: List[Dict[str, Any]] = []
+        for entry in history:
+            if not isinstance(entry, dict):
+                continue
+            step = entry.get("step")
+            loss_val = entry.get("loss", entry.get("train_loss"))
+            if step is None or loss_val is None:
+                continue
+            try:
+                step_int = int(step)
+                loss_float = float(loss_val)
+            except (TypeError, ValueError):
+                continue
+            lr_val = entry.get("learning_rate")
+            lr_float: Optional[float]
+            try:
+                lr_float = float(lr_val) if lr_val is not None else None
+            except (TypeError, ValueError):
+                lr_float = None
+            cleaned.append(
+                {
+                    "step": step_int,
+                    "loss": loss_float,
+                    "learning_rate": lr_float,
+                }
+            )
+        cleaned.sort(key=lambda rec: rec["step"])
+        return cleaned
+
+    def _select_record(history: List[Dict[str, Any]], target_step: int) -> Optional[Dict[str, Any]]:
+        if not history:
+            return None
+        for record in history:
+            if record["step"] == target_step:
+                return record
+            if record["step"] > target_step:
+                return record
+        return history[-1]
+
+    def _format_record(record: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if not record:
+            return {"step": None, "loss": None, "learning_rate": None}
+        return {
+            "step": record.get("step"),
+            "loss": record.get("loss"),
+            "learning_rate": record.get("learning_rate"),
+        }
+
+    def _loss_per_step(history: List[Dict[str, Any]]) -> Optional[float]:
+        if len(history) < 2:
+            return None
+        start = history[0]
+        end = history[-1]
+        if start.get("loss") is None or end.get("loss") is None:
+            return None
+        step_delta = max(1, end["step"] - start["step"])
+        return (start["loss"] - end["loss"]) / step_delta
+
+    metrics_dir = run_dir / "metrics"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    comparison_file = metrics_dir / "training_comparison.json"
+    existing: Dict[str, Any] = {}
+    if comparison_file.exists():
+        try:
+            with open(comparison_file, "r", encoding="utf-8") as fp:
+                existing = json.load(fp)
+        except Exception:
+            existing = {}
+
+    mode_key = "full_model" if mode.lower() == "full" else mode
+    comparison_points = comparison_points or [1, 10, 50, 100]
+    point_values = sorted({int(p) for p in comparison_points if isinstance(p, int) and p > 0})
+
+    try:
+        baseline_history = _load_history(baseline_trainer_state)
+    except Exception as exc:
+        logger.warning("Failed to load baseline trainer_state for %s: %s", mode_key, exc)
+        existing[mode_key] = {
+            "error": f"baseline trainer_state unavailable: {exc}",
+            "baseline_trainer_state": baseline_trainer_state,
+            "adapted_trainer_state": adapted_trainer_state,
+        }
+        with open(comparison_file, "w", encoding="utf-8") as fp:
+            json.dump(existing, fp, indent=2)
+        return existing
+    try:
+        adapted_history = _load_history(adapted_trainer_state)
+    except Exception as exc:
+        logger.warning("Failed to load adapted trainer_state for %s: %s", mode_key, exc)
+        existing[mode_key] = {
+            "error": f"adapted trainer_state unavailable: {exc}",
+            "baseline_trainer_state": baseline_trainer_state,
+            "adapted_trainer_state": adapted_trainer_state,
+        }
+        with open(comparison_file, "w", encoding="utf-8") as fp:
+            json.dump(existing, fp, indent=2)
+        return existing
+
+    if not baseline_history or not adapted_history:
+        existing[mode_key] = {
+            "error": "insufficient training history for comparison",
+            "baseline_trainer_state": baseline_trainer_state,
+            "adapted_trainer_state": adapted_trainer_state,
+        }
+        with open(comparison_file, "w", encoding="utf-8") as fp:
+            json.dump(existing, fp, indent=2)
+        return existing
+
+    final_step_baseline = baseline_history[-1]["step"]
+    final_step_adapted = adapted_history[-1]["step"]
+    midpoint_baseline = max(1, final_step_baseline // 2)
+    midpoint_adapted = max(1, final_step_adapted // 2)
+
+    def _collect(history: List[Dict[str, Any]], midpoint_step: int, final_label: str) -> Dict[str, Dict[str, Any]]:
+        bucket: Dict[str, Dict[str, Any]] = {}
+        for point in point_values:
+            bucket[f"step_{point}"] = _format_record(_select_record(history, point))
+        bucket["midpoint"] = _format_record(_select_record(history, midpoint_step))
+        bucket["final"] = _format_record(history[-1])
+        return bucket
+
+    baseline_points = _collect(baseline_history, midpoint_baseline, "baseline_final")
+    adapted_points = _collect(adapted_history, midpoint_adapted, "adapted_final")
+
+    improvements: Dict[str, Any] = {}
+    for label, base_entry in baseline_points.items():
+        if label == "efficiency":
+            continue
+        adapted_entry = adapted_points.get(label)
+        base_loss = base_entry.get("loss")
+        adapted_loss = adapted_entry.get("loss") if adapted_entry else None
+        if base_loss is None or adapted_loss is None:
+            continue
+        absolute = adapted_loss - base_loss
+        relative = (
+            (absolute / base_loss) * 100.0
+            if base_loss is not None and base_loss != 0
+            else None
+        )
+        improvements[label] = {
+            "absolute": absolute,
+            "relative_pct": relative,
+        }
+
+    base_eff = _loss_per_step(baseline_history)
+    adapted_eff = _loss_per_step(adapted_history)
+    if base_eff is not None and adapted_eff is not None and base_eff != 0:
+        improvements["efficiency"] = {
+            "baseline_loss_per_step": base_eff,
+            "adapted_loss_per_step": adapted_eff,
+            "improvement_pct": ((base_eff - adapted_eff) / abs(base_eff)) * 100.0,
+        }
+
+    mode_result = {
+        "baseline": baseline_points,
+        "adapted": adapted_points,
+        "improvement": improvements,
+        "metadata": {
+            "baseline_trainer_state": baseline_trainer_state,
+            "adapted_trainer_state": adapted_trainer_state,
+        },
+    }
+    existing[mode_key] = mode_result
+    with open(comparison_file, "w", encoding="utf-8") as fp:
+        json.dump(existing, fp, indent=2)
+    return existing
+
+
+def compare_final_performance(
+    *,
+    run_dir: Path,
+    baseline_model_path: str,
+    baseline_tokenizer_path: str,
+    adapted_model_path: str,
+    adapted_tokenizer_path: str,
+    eval_config: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Compare final performance of baseline vs. adapted models on shared evaluations.
+    """
+    from . import eval_medical  # Local import to avoid heavy dependency for callers that skip eval
+
+    metrics_dir = run_dir / "metrics"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    output_path = metrics_dir / "performance_comparison.json"
+
+    comparison: Dict[str, Any] = {
+        "perplexity": {},
+        "qa": None,
+        "tokenization": None,
+    }
+
+    eval_batch = int(os.getenv("TOKALIGN_EVAL_BATCH", "32"))
+    eval_maxlen = int(os.getenv("TOKALIGN_EVAL_MAXLEN", "1024"))
+    max_samples = int(eval_config.get("max_samples", 128))
+    datasets_cfg = list(eval_config.get("datasets") or [])
+
+    for dataset_spec in datasets_cfg:
+        dataset_name, dataset_conf, split = eval_medical.parse_dataset_spec(dataset_spec)
+        dataset_label = dataset_name if not dataset_conf else f"{dataset_name}[{dataset_conf}]"
+        entry: Dict[str, Any] = {
+            "dataset": dataset_label,
+            "split": split,
+            "baseline": None,
+            "adapted": None,
+        }
+        try:
+            baseline_ppl = eval_medical.evaluate_perplexity(
+                model_path=baseline_model_path,
+                tokenizer_path=baseline_tokenizer_path,
+                dataset_name=dataset_name,
+                split=split,
+                dataset_config=dataset_conf,
+                max_samples=None if max_samples <= 0 else max_samples,
+                batch_size=eval_batch,
+                max_length=eval_maxlen,
+            )
+            adapted_ppl = eval_medical.evaluate_perplexity(
+                model_path=adapted_model_path,
+                tokenizer_path=adapted_tokenizer_path,
+                dataset_name=dataset_name,
+                split=split,
+                dataset_config=dataset_conf,
+                max_samples=None if max_samples <= 0 else max_samples,
+                batch_size=eval_batch,
+                max_length=eval_maxlen,
+            )
+            entry["baseline"] = baseline_ppl
+            entry["adapted"] = adapted_ppl
+            entry["improvement_pct"] = (
+                ((baseline_ppl - adapted_ppl) / baseline_ppl) * 100.0
+                if baseline_ppl is not None and baseline_ppl != 0
+                else None
+            )
+        except Exception as exc:
+            logger.warning("Perplexity evaluation failed for %s:%s - %s", dataset_label, split, exc)
+            entry["error"] = str(exc)
+        comparison["perplexity"][f"{dataset_label}:{split}"] = entry
+
+    if bool(eval_config.get("qa", False)):
+        qa_entry: Dict[str, Any] = {}
+        try:
+            baseline_res = eval_medical.evaluate_medmcqa(
+                model_path=baseline_model_path,
+                tokenizer_path=baseline_tokenizer_path,
+                split="validation",
+                max_samples=None if max_samples <= 0 else max_samples,
+            )
+            adapted_res = eval_medical.evaluate_medmcqa(
+                model_path=adapted_model_path,
+                tokenizer_path=adapted_tokenizer_path,
+                split="validation",
+                max_samples=None if max_samples <= 0 else max_samples,
+            )
+            qa_entry = {
+                "baseline": baseline_res,
+                "adapted": adapted_res,
+                "improvement": {
+                    "accuracy_delta": adapted_res["accuracy"] - baseline_res["accuracy"],
+                    "accuracy_relative": (
+                        ((adapted_res["accuracy"] - baseline_res["accuracy"]) / baseline_res["accuracy"]) * 100.0
+                        if baseline_res["accuracy"] is not None and baseline_res["accuracy"] != 0
+                        else None
+                    ),
+                },
+            }
+        except Exception as exc:
+            logger.warning("MedMCQA evaluation failed: %s", exc)
+            qa_entry = {"error": str(exc)}
+        comparison["qa"] = qa_entry
+
+    terms_path = run_dir / "corpus" / "medical_terms.txt"
+    if terms_path.exists():
+        try:
+            baseline_tok = eval_medical.compute_term_tokenization_coverage(
+                terms_path=str(terms_path),
+                tokenizer_path=baseline_tokenizer_path,
+            )
+            adapted_tok = eval_medical.compute_term_tokenization_coverage(
+                terms_path=str(terms_path),
+                tokenizer_path=adapted_tokenizer_path,
+            )
+            tokenization_entry = {
+                "terms_path": str(terms_path),
+                "baseline": baseline_tok,
+                "adapted": adapted_tok,
+                "improvement": {
+                    "single_token_ratio_delta": (
+                        adapted_tok.get("single_token_ratio") - baseline_tok.get("single_token_ratio")
+                        if baseline_tok.get("single_token_ratio") is not None
+                        and adapted_tok.get("single_token_ratio") is not None
+                        else None
+                    ),
+                    "mean_tokens_delta": (
+                        baseline_tok.get("mean_tokens_per_term") - adapted_tok.get("mean_tokens_per_term")
+                        if baseline_tok.get("mean_tokens_per_term") is not None
+                        and adapted_tok.get("mean_tokens_per_term") is not None
+                        else None
+                    ),
+                },
+            }
+            comparison["tokenization"] = tokenization_entry
+        except Exception as exc:
+            logger.warning("Tokenization efficiency comparison failed: %s", exc)
+            comparison["tokenization"] = {"error": str(exc), "terms_path": str(terms_path)}
+
+    with open(output_path, "w", encoding="utf-8") as fp:
+        json.dump(comparison, fp, indent=2)
+    return comparison
+
+
+def generate_initialization_analysis(
+    *,
+    run_dir: Path,
+    training_comparison: Dict[str, Any],
+    performance_comparison: Dict[str, Any],
+) -> Dict[str, str]:
+    """
+    Build a markdown report plus structured data summarising initialization quality.
+    """
+    metrics_dir = run_dir / "metrics"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    report_path = metrics_dir / "initialization_analysis.md"
+    json_path = metrics_dir / "initialization_data.json"
+    csv_path = metrics_dir / "initialization_data.csv"
+
+    def _fmt_pct(value: Optional[float]) -> str:
+        if value is None or not isinstance(value, (int, float)) or math.isnan(value):
+            return "N/A"
+        return f"{value:+.1f}%"
+
+    def _fmt_loss(value: Optional[float]) -> str:
+        if value is None or not isinstance(value, (int, float)) or math.isnan(value):
+            return "N/A"
+        return f"{value:.3f}"
+
+    summary_lines: List[str] = []
+    embed_step1 = (
+        training_comparison.get("embed_only", {})
+        .get("improvement", {})
+        .get("step_1", {})
+        .get("relative_pct")
+        if isinstance(training_comparison, dict)
+        else None
+    )
+    full_step1 = (
+        training_comparison.get("full_model", {})
+        .get("improvement", {})
+        .get("step_1", {})
+        .get("relative_pct")
+        if isinstance(training_comparison, dict)
+        else None
+    )
+    if embed_step1 is not None:
+        summary_lines.append(f"- Step 1 Loss Improvement (embeddings-only): {_fmt_pct(embed_step1)}")
+    if full_step1 is not None:
+        summary_lines.append(f"- Step 1 Loss Improvement (full model): {_fmt_pct(full_step1)}")
+
+    efficiency = (
+        training_comparison.get("embed_only", {})
+        .get("improvement", {})
+        .get("efficiency", {})
+        .get("improvement_pct")
+        if isinstance(training_comparison, dict)
+        else None
+    )
+    if efficiency is not None:
+        summary_lines.append(f"- Training Efficiency Gain: {_fmt_pct(efficiency)} faster loss reduction")
+
+    # Final performance summary (use first dataset if available)
+    perf_summary = ""
+    perplexity_entries = performance_comparison.get("perplexity", {}) if isinstance(performance_comparison, dict) else {}
+    if isinstance(perplexity_entries, dict):
+        for label, entry in perplexity_entries.items():
+            if isinstance(entry, dict) and entry.get("improvement_pct") is not None:
+                perf_summary = f"{label}: {_fmt_pct(entry['improvement_pct'])} perplexity gain"
+                break
+    if perf_summary:
+        summary_lines.append(f"- Final Perplexity: {perf_summary}")
+    qa_entry = performance_comparison.get("qa") if isinstance(performance_comparison, dict) else None
+    if isinstance(qa_entry, dict) and isinstance(qa_entry.get("improvement"), dict):
+        qa_delta = qa_entry["improvement"].get("accuracy_delta")
+        qa_rel = qa_entry["improvement"].get("accuracy_relative")
+        baseline_acc = qa_entry.get("baseline", {}).get("accuracy")
+        adapted_acc = qa_entry.get("adapted", {}).get("accuracy")
+        if qa_delta is not None:
+            if isinstance(baseline_acc, (int, float)) and isinstance(adapted_acc, (int, float)):
+                summary_lines.append(
+                    f"- MedMCQA Accuracy: {baseline_acc:.3f} → {adapted_acc:.3f} "
+                    f"({qa_delta:+.3f} abs, {_fmt_pct(qa_rel)} rel)"
+                )
+            else:
+                summary_lines.append(f"- MedMCQA Accuracy Gain: {qa_delta:+.3f} ({_fmt_pct(qa_rel)})")
+
+    sections: List[str] = []
+    sections.append("# Initialization Quality Analysis")
+    sections.append("\n## Summary")
+    if summary_lines:
+        sections.extend(summary_lines)
+    else:
+        sections.append("- No comparison data available.")
+
+    # Detailed training sections
+    def _build_training_section(mode_key: str, label: str) -> str:
+        mode_data = training_comparison.get(mode_key, {}) if isinstance(training_comparison, dict) else {}
+        baseline = mode_data.get("baseline", {})
+        adapted = mode_data.get("adapted", {})
+        improvement = mode_data.get("improvement", {})
+        lines = [f"### {label}"]
+        step1_base = baseline.get("step_1", {}).get("loss")
+        step1_adapt = adapted.get("step_1", {}).get("loss")
+        if step1_base is not None and step1_adapt is not None:
+            rel = improvement.get("step_1", {}).get("relative_pct")
+            lines.append(
+                f"- Step 1 loss: {step1_base:.3f} → {step1_adapt:.3f} ({_fmt_pct(rel)})"
+            )
+        final_base = baseline.get("final", {}).get("loss")
+        final_adapt = adapted.get("final", {}).get("loss")
+        if final_base is not None and final_adapt is not None:
+            rel_final = improvement.get("final", {}).get("relative_pct")
+            lines.append(
+                f"- Final loss: {final_base:.3f} → {final_adapt:.3f} ({_fmt_pct(rel_final)})"
+            )
+        eff = improvement.get("efficiency", {}).get("improvement_pct")
+        if eff is not None:
+            lines.append(f"- Loss reduction per step improvement: {_fmt_pct(eff)}")
+        return "\n".join(lines)
+
+    if isinstance(training_comparison, dict) and training_comparison:
+        sections.append("\n## Detailed Findings\n")
+        if "embed_only" in training_comparison:
+            sections.append(_build_training_section("embed_only", "Embeddings-only Training"))
+        if "full_model" in training_comparison:
+            sections.append(_build_training_section("full_model", "Full-Model Training"))
+
+    # Final performance section
+    sections.append("\n### Final Performance")
+    if isinstance(performance_comparison, dict) and performance_comparison:
+        perplexity_lines: List[str] = []
+        for label, entry in (performance_comparison.get("perplexity", {}) or {}).items():
+            if (
+                isinstance(entry, dict)
+                and isinstance(entry.get("baseline"), (int, float))
+                and isinstance(entry.get("adapted"), (int, float))
+            ):
+                perplexity_lines.append(
+                    f"- {label}: {entry['baseline']:.2f} → {entry['adapted']:.2f} "
+                    f"({_fmt_pct(entry.get('improvement_pct'))})"
+                )
+        if perplexity_lines:
+            sections.extend(perplexity_lines)
+        qa_entry = performance_comparison.get("qa")
+        if (
+            isinstance(qa_entry, dict)
+            and isinstance(qa_entry.get("baseline", {}).get("accuracy"), (int, float))
+            and isinstance(qa_entry.get("adapted", {}).get("accuracy"), (int, float))
+        ):
+            sections.append(
+                f"- MedMCQA accuracy: {qa_entry['baseline']['accuracy']:.3f} → "
+                f"{qa_entry['adapted']['accuracy']:.3f} "
+                f"({_fmt_pct(qa_entry.get('improvement', {}).get('accuracy_relative'))})"
+            )
+        token_entry = performance_comparison.get("tokenization")
+        if isinstance(token_entry, dict) and token_entry.get("baseline") and token_entry.get("adapted"):
+            base_single = token_entry["baseline"].get("single_token_ratio")
+            adapted_single = token_entry["adapted"].get("single_token_ratio")
+            single_delta = token_entry.get("improvement", {}).get("single_token_ratio_delta")
+            if isinstance(base_single, (int, float)) and isinstance(adapted_single, (int, float)):
+                pct_delta = single_delta * 100.0 if isinstance(single_delta, (int, float)) else None
+                sections.append(
+                    f"- Single-token ratio: {base_single:.3f} → {adapted_single:.3f} ({_fmt_pct(pct_delta)})"
+                )
+    else:
+        sections.append("- No performance data available.")
+
+    report_text = "\n".join(sections)
+    with open(report_path, "w", encoding="utf-8") as fp:
+        fp.write(report_text.strip() + "\n")
+
+    combined_data = {
+        "training_comparison": training_comparison,
+        "performance_comparison": performance_comparison,
+    }
+    with open(json_path, "w", encoding="utf-8") as fp:
+        json.dump(combined_data, fp, indent=2)
+
+    # Visualization-friendly CSV rows
+    csv_rows: List[List[Any]] = [["mode", "point", "baseline_loss", "adapted_loss", "absolute_delta", "relative_pct"]]
+    if isinstance(training_comparison, dict):
+        for mode_key, mode_data in training_comparison.items():
+            baseline_points = mode_data.get("baseline", {}) if isinstance(mode_data, dict) else {}
+            adapted_points = mode_data.get("adapted", {}) if isinstance(mode_data, dict) else {}
+            improvements = mode_data.get("improvement", {}) if isinstance(mode_data, dict) else {}
+            for point, base_entry in baseline_points.items():
+                if not isinstance(base_entry, dict) or "loss" not in base_entry:
+                    continue
+                adapt_entry = adapted_points.get(point, {})
+                improv_entry = improvements.get(point, {})
+                csv_rows.append(
+                    [
+                        mode_key,
+                        point,
+                        base_entry.get("loss"),
+                        adapt_entry.get("loss"),
+                        improv_entry.get("absolute"),
+                        improv_entry.get("relative_pct"),
+                    ]
+                )
+    with open(csv_path, "w", encoding="utf-8", newline="") as fp:
+        writer = csv.writer(fp)
+        writer.writerows(csv_rows)
+
+    return {
+        "report": str(report_path),
+        "data": str(json_path),
+        "csv": str(csv_path),
     }
 
 def parse_args() -> argparse.Namespace:

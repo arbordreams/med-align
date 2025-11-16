@@ -528,7 +528,7 @@ def main():
             logger.info(f"New config: {config}")
 
     # use_cache=True is incompatible with gradient checkpointing
-    config.use_cache=False
+    config.use_cache = False
 
     tokenizer_kwargs = {
         "cache_dir": model_args.cache_dir,
