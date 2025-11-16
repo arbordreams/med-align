@@ -68,12 +68,14 @@ if missing_paths:
 # Configure number of workers (default: 32, can be overridden via NUM_WORKERS env var)
 NUM_WORKERS = int(os.environ.get('NUM_WORKERS', '32'))
 
-def print_progress_bar(current, total, width=50):
-    """Print a simple text progress bar."""
+def print_progress_bar(current, total, width=50, extra_info=''):
+    """Print a simple text progress bar with optional extra info."""
     percent = current / total if total > 0 else 0
     filled = int(width * percent)
     bar = '=' * filled + '-' * (width - filled)
-    sys.stdout.write(f'\r  [{bar}] {percent*100:5.1f}%')
+    # Combine progress bar and extra info in a single write to avoid terminal conflicts
+    line = f'\r  [{bar}] {percent*100:5.1f}%{extra_info}'
+    sys.stdout.write(line)
     sys.stdout.flush()
 
 def calculate_percentile(data, percentile):
@@ -300,9 +302,9 @@ with Pool(processes=NUM_WORKERS, initializer=init_worker, initargs=(run_dir_str,
         rate = processed_examples / elapsed if elapsed > 0 else 0
         remaining = (total_examples - processed_examples) / rate if rate > 0 else 0
         
-        # Progress bar + detailed stats
-        print_progress_bar(processed_examples, total_examples)
-        print(f'  {processed_examples:,} / {total_examples:,} | Elapsed: {elapsed/60:.1f}m | Rate: {rate:.0f} ex/s | ETA: {remaining/60:.1f}m', end='')
+        # Progress bar + detailed stats (combined to avoid terminal escape sequence issues)
+        extra_info = f'  {processed_examples:,} / {total_examples:,} | Elapsed: {elapsed/60:.1f}m | Rate: {rate:.0f} ex/s | ETA: {remaining/60:.1f}m'
+        print_progress_bar(processed_examples, total_examples, extra_info=extra_info)
     
     print()
     print()
