@@ -1,0 +1,70 @@
+models:
+  source_tokenizer: "BioMistral/BioMistral-7B"
+  target_tokenizer: "mistralai/Mistral-7B-v0.3"
+  source_model: "BioMistral/BioMistral-7B"
+
+corpus:
+  # Medium-sized 5GB run: good coverage with lower wall-clock than 10GB research runs.
+  size_gb: 5.0
+  byte_budget: 0   # 0 = derive from size_gb
+  deduplicate: true
+  hash_name: "sha256"
+
+term_mining:
+  # Slightly smaller than full research to reduce downstream overhead.
+  top_k: 1500
+  min_frequency: 5
+  use_tfidf: true
+
+embedding:
+  backend: "fasttext"
+  fasttext:
+    epochs: 20          # Fewer epochs than research_optimal (30) to save time.
+    mincount: 3
+    lr: 0.05
+    thread: null        # auto-scaled based on detected vCPUs
+
+alignment:
+  pivot_count: 1500
+  similarity_threshold: 0.4
+
+tokenization:
+  workers: null         # auto-scaled
+  cache_dir: null
+  min_line_length: 0
+
+evaluation:
+  enabled: true
+  datasets:
+    - "uiyunkim-hub/pubmed-abstract:validation"
+  max_samples: 2000     # More than ultra-quick, less than full research.
+  qa: true
+  baseline_model: "mistralai/Mistral-7B-v0.3"
+
+pipeline:
+  run_root: "runs/tokenizer_adapt"
+  max_retries: 1
+  retry_backoff: 5.0
+
+vocab_adaptation:
+  enabled: true
+  # Stage 1: embeddings-only warmup
+  stage1_steps: 1500        # Between ultra_quick_demo (10) and research_optimal (2500)
+  lr_stage1: 5e-5
+  # Stage 2: full-model fine-tuning with LoRA for stability + efficiency
+  stage2_steps: 1500
+  lr_stage2: 5.0e-5
+  batch_size: 8             # GH200: use wider batch for good utilization
+  gradient_accumulation: 8  # Effective batch ~64 sequences/step
+  max_seq_length: 2048
+  train_start_idx_stage2: 0
+  stage2_use_lora: true
+  stage2_optimizer: "adamw_torch"
+  lora_r: 64
+  lora_alpha: 16
+  lora_dropout: 0.1
+  lora_target_modules: "q_proj,k_proj,v_proj,o_proj,down_proj,up_proj,gate_proj"
+  seed: 0
+  use_flash_attn: false      # Optional; left disabled on GH200
+  bf16: false                # FP32 for quality-first runs
+

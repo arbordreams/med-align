@@ -52,8 +52,8 @@ vocab_adaptation:
   # Stage 2: Full model fine-tuning with LoRA for stability
   stage2_steps: 2500
   lr_stage2: 5.0e-5  # Standard for 7B models
-  batch_size: 4  # Increased from 2 for better gradient estimates
-  gradient_accumulation: 16
+  batch_size: 8  # GH200: larger per-device batch for better GPU utilization
+  gradient_accumulation: 8  # Keep effective batch ~64 while doubling throughput
   max_seq_length: 2048
   train_start_idx_stage2: 0  # 10GB corpus: start from beginning; offset is mainly useful for smaller corpora.
   # LoRA for Stage 2: Better stability and memory efficiency

@@ -100,9 +100,9 @@ vocab_adaptation:
   lr_stage2: 4.0e-5
 
   # Per‑device batch; with FP32 and gradient checkpointing this fits comfortably on GH200.
-  batch_size: 2
-  # Effective batch ~ 2 * 32 = 64 sequences/step for Stage 1 and Stage 2.
-  gradient_accumulation: 32
+  batch_size: 4  # Higher per-device batch for better throughput
+  # Effective batch ~ 4 * 16 = 64 sequences/step for Stage 1 and Stage 2.
+  gradient_accumulation: 16
   max_seq_length: 2048
   # Start at beginning of dataset for Stage 2; we want the model to see full corpus,
   # not just a high‑index slice, for fair baseline vs adapted comparisons.
