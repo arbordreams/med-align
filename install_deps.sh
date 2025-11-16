@@ -35,15 +35,15 @@ fi
 echo "[install] Upgrading pip, setuptools, wheel..."
 pip install --upgrade pip setuptools wheel
 
-echo "[install] Installing torch==2.7.1 and compatible torchvision (CUDA 12.8 wheels)..."
-# Install torch 2.7.1 (CUDA 12.8 wheels) with compatible torchvision
+echo "[install] Installing torch==2.7.1 (CUDA 12.8 wheels)..."
+# Install torch 2.7.1 (CUDA 12.8 wheels). torchvision is optional for this project and installed via requirements if needed.
 # Use --user only if not in venv (venv detection happens above)
 # torchvision 0.23.0 is compatible with torch 2.8.0
 PIP_USER_FLAG=""
 if [ -z "${VIRTUAL_ENV:-}" ]; then
   PIP_USER_FLAG="--user"
 fi
-pip install ${PIP_USER_FLAG} --force-reinstall --no-cache-dir torch==2.7.1 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
+pip install ${PIP_USER_FLAG} --force-reinstall --no-cache-dir torch==2.7.1 --index-url https://download.pytorch.org/whl/cu128
 
 echo "[install] Installing remaining Python dependencies (excluding torch/flash-attn)..."
 # Filter out torch and flash-attn from bulk install to avoid build/ABI issues
