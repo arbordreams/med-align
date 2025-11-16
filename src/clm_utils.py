@@ -69,8 +69,21 @@ class ConstantLengthDataset(IterableDataset):
         self.concat_token_id = tokenizer.eos_token_id
         self.dataset = dataset
         if start_idx != 0:
-            print(f"Reset the start index of dataset to {start_idx}.")
-            self.dataset = concatenate_datasets([dataset.select(range(start_idx, len(dataset))), dataset.select(range(0, start_idx))])
+            # Robust handling when start_idx exceeds dataset length (e.g., tiny smoke datasets).
+            # We rotate the dataset by start_idx modulo len(dataset) instead of erroring.
+            ds_len = len(dataset)
+            if ds_len <= 0:
+                start_idx = 0
+            else:
+                start_idx = start_idx % ds_len
+            if start_idx != 0:
+                print(f"Reset the start index of dataset to {start_idx}.")
+                self.dataset = concatenate_datasets(
+                    [
+                        dataset.select(range(start_idx, ds_len)),
+                        dataset.select(range(0, start_idx)),
+                    ]
+                )
         self.need_tokenize = False if 'input_ids' in dataset.features else True
         self.content_field = 'input_ids' if 'input_ids' in dataset.features else content_field
         self.seq_length = seq_length
